@@ -8,6 +8,8 @@ public enum ErrorCode
 {
     Unknown = 0,
     ValidationError,
+    Unauthorized,           // 토큰 없음/만료/서명 불일치 (HTTP 401)
+    Forbidden,              // 권한 부족: 어드민 롤 필요 등 (HTTP 403)
     PlayerNotFound,
     TemplateNotFound,
     InstanceNotFound,

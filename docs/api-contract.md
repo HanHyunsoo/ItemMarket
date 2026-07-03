@@ -3,9 +3,22 @@
 아포칼립스 익스트랙션 슈터 테마의 아이템 거래소. 모든 응답은 공통 봉투
 `ApiResponse<T>`(`Success` / `Data` / `Error`)로 감싼다. 열거형은 문자열로 직렬화한다.
 
-- 인증: (1주 스코프) 생략. 플레이어 식별은 `X-Player-Id: <uuid>` 헤더.
+- 인증: **JWT (Bearer)**. `POST /api/auth/login` 으로 토큰 발급 → 이후 모든 요청에
+  `Authorization: Bearer <token>`. 플레이어 식별은 토큰의 `sub`(playerId) 클레임을
+  서버가 신뢰(헤더 스푸핑 불가). HS256 대칭키 서명.
+- 인가: 어드민 엔드포인트(`/api/admin/*`)는 `admin` 롤 클레임 필요(없으면 403).
 - 금액 단위: 병뚜껑(CAP), `long`(정수).
 - 오류: `Error.Code`(열거형, `ErrorCode`)로 분기, `Error.Message`로 표시.
+  인증 실패는 `Unauthorized`(401), 권한 부족은 `Forbidden`(403).
+
+## 인증 엔드포인트
+
+| 메서드 | 경로 | 바디 | 응답 `Data` |
+|---|---|---|---|
+| POST | `/api/auth/login` | `LoginRequest` | `TokenResponse` (AccessToken/Roles 등) |
+
+> 개발 스코프: 비밀번호 없이 시드 플레이어 ID로 로그인. 어드민 롤은 설정값
+> `Auth:AdminPlayerId`(기본 `33333333-...-333333333333` Trader_Charlie)에 부여.
 
 ## 플레이어용 엔드포인트
 
