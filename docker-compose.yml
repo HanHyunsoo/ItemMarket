@@ -1,0 +1,28 @@
+# 개발용 리소스: PostgreSQL
+#   docker compose up -d       # 최초 기동 시 db/ddl.sql 자동 실행(스키마+시드)
+#   docker compose down        # 컨테이너 종료(데이터 유지)
+#   docker compose down -v     # 볼륨까지 삭제(스키마 초기화 → 다음 up에서 ddl 재실행)
+services:
+  postgres:
+    image: postgres:16
+    container_name: item-market-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: market
+      POSTGRES_PASSWORD: market
+      POSTGRES_DB: item_market
+      TZ: Asia/Seoul
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # ddl.sql 은 최초 1회(빈 볼륨)에만 자동 실행된다.
+      - ./db/ddl.sql:/docker-entrypoint-initdb.d/01_ddl.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U market -d item_market"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
