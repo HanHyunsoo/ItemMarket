@@ -139,4 +139,25 @@ public class StashTests(MarketAppFixture f)
         Assert.Equal(HttpStatusCode.BadRequest, oob.StatusCode);
         Assert.Equal(ErrorCode.PlacementInvalid, (await Api<StashDto>(oob)).Error!.Code);
     }
+
+    // 회귀: 같은 템플릿의 무기를 여러 자루 보유해도 각 인스턴스가 개별 배치된다.
+    // (과거 uq_stash_stack이 INSTANCE 행에도 적용되어 두 번째 배치가 duplicate key로 실패했음.)
+    [Fact]
+    public async Task Multiple_instances_of_same_template_all_place()
+    {
+        var admin = await _f.AuthedAs(Charlie);
+        var alpha = await _f.AuthedAs(Alpha);
+
+        // Alpha에게 마카로프 권총(템플릿 74) 인스턴스 2자루 지급.
+        var g1 = await Api<ItemInstanceDto>(await admin.PostAsJsonAsync("/api/admin/grant/instance",
+            new AdminGrantInstanceRequest(Alpha, 74, 300, null), Json));
+        var g2 = await Api<ItemInstanceDto>(await admin.PostAsJsonAsync("/api/admin/grant/instance",
+            new AdminGrantInstanceRequest(Alpha, 74, 250, null), Json));
+        Assert.True(g1.Success && g2.Success);
+
+        // GetStash가 duplicate key 없이 두 인스턴스를 모두 배치해야 한다.
+        var stash = await GetStash(alpha);
+        Assert.Contains(stash.Placements, p => p.InstanceId == g1.Data!.Id);
+        Assert.Contains(stash.Placements, p => p.InstanceId == g2.Data!.Id);
+    }
 }

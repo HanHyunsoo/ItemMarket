@@ -331,7 +331,7 @@ public sealed class MarketRepository(string connectionString)
         await db.ExecuteAsync(
             @"INSERT INTO stash_placement(player_id, kind, template_id, instance_id, x, y)
               VALUES (@playerId, 'STACK', @templateId, NULL, @x, @y)
-              ON CONFLICT (player_id, template_id, kind)
+              ON CONFLICT (player_id, template_id) WHERE kind = 'STACK'
               DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y",
             new { playerId, templateId, x, y });
     }

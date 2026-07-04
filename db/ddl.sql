@@ -92,12 +92,14 @@ CREATE TABLE stash_placement (
     instance_id UUID REFERENCES item_instance(id),     -- INSTANCE일 때만
     x           INT  NOT NULL CHECK (x >= 0),
     y           INT  NOT NULL CHECK (y >= 0),
-    -- 한 아이템은 스태시에 한 번만 배치: 스택형은 템플릿 단위, 유니크는 인스턴스 단위로 유일.
-    CONSTRAINT uq_stash_stack    UNIQUE (player_id, template_id, kind),
+    -- 유니크 아이템은 인스턴스 단위로 유일(같은 템플릿 무기를 여러 자루 소유 가능).
     CONSTRAINT uq_stash_instance UNIQUE (instance_id),
     CHECK ((kind = 'INSTANCE') = (instance_id IS NOT NULL))
 );
 CREATE INDEX idx_stash_player ON stash_placement(player_id);
+-- 스택형만 (player, template) 당 1개. 부분 유니크 인덱스라 INSTANCE 행에는 적용되지 않는다
+-- (INSTANCE는 uq_stash_instance로 인스턴스별 유일 → 동일 템플릿 무기 다수 보유 허용).
+CREATE UNIQUE INDEX uq_stash_stack ON stash_placement(player_id, template_id) WHERE kind = 'STACK';
 
 -- ----------------------------------------------------------------------------
 -- 주문서(order book) & 체결(trade)
