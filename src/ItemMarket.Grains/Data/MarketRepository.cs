@@ -320,9 +320,17 @@ public sealed class MarketRepository(string connectionString)
                  @InstanceId, @Status, @EscrowCaps, @CreatedAt, @CreatedAt)",
             new
             {
-                o.Id, o.PlayerId, Side = o.Side.ToDb(), o.TemplateId, o.UnitPrice,
-                o.Quantity, o.RemainingQuantity, o.InstanceId, Status = o.Status.ToDb(),
-                o.EscrowCaps, o.CreatedAt
+                o.Id,
+                o.PlayerId,
+                Side = o.Side.ToDb(),
+                o.TemplateId,
+                o.UnitPrice,
+                o.Quantity,
+                o.RemainingQuantity,
+                o.InstanceId,
+                Status = o.Status.ToDb(),
+                o.EscrowCaps,
+                o.CreatedAt
             });
     }
 
@@ -459,8 +467,20 @@ public sealed class MarketRepository(string connectionString)
                   VALUES
                     (@TradeId, @TemplateId, @BuyOrderId, @SellOrderId, @BuyerId, @SellerId,
                      @ExecPrice, @Quantity, @InstanceId, @fee, @ExecutedAt)",
-                new { a.TradeId, a.TemplateId, a.BuyOrderId, a.SellOrderId, a.BuyerId, a.SellerId,
-                      a.ExecPrice, a.Quantity, a.InstanceId, fee, a.ExecutedAt }, tx);
+                new
+                {
+                    a.TradeId,
+                    a.TemplateId,
+                    a.BuyOrderId,
+                    a.SellOrderId,
+                    a.BuyerId,
+                    a.SellerId,
+                    a.ExecPrice,
+                    a.Quantity,
+                    a.InstanceId,
+                    fee,
+                    a.ExecutedAt
+                }, tx);
 
             // 2) 판매자: 총액 수령(+) 후 수수료 소각(-). 순수령 = gross - fee.
             var sellerAfterGross = await db.ExecuteScalarAsync<long>(

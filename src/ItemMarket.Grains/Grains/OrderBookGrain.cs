@@ -57,8 +57,13 @@ public sealed class OrderBookGrain(MarketRepository repo, ILogger<OrderBookGrain
         {
             _book.Add(new Resting
             {
-                Id = o.Id, PlayerId = o.PlayerId, Side = o.Side, UnitPrice = o.UnitPrice,
-                Remaining = o.RemainingQuantity, InstanceId = o.InstanceId, CreatedAt = o.CreatedAt
+                Id = o.Id,
+                PlayerId = o.PlayerId,
+                Side = o.Side,
+                UnitPrice = o.UnitPrice,
+                Remaining = o.RemainingQuantity,
+                InstanceId = o.InstanceId,
+                CreatedAt = o.CreatedAt
             });
         }
         await base.OnActivateAsync(ct);
@@ -165,8 +170,12 @@ public sealed class OrderBookGrain(MarketRepository repo, ILogger<OrderBookGrain
 
         var incoming = new Resting
         {
-            Id = orderId, PlayerId = playerId, Side = req.Side, UnitPrice = req.UnitPrice,
-            Remaining = req.Quantity, InstanceId = req.Side == OrderSide.Sell && !_stackable ? req.InstanceId : null,
+            Id = orderId,
+            PlayerId = playerId,
+            Side = req.Side,
+            UnitPrice = req.UnitPrice,
+            Remaining = req.Quantity,
+            InstanceId = req.Side == OrderSide.Sell && !_stackable ? req.InstanceId : null,
             CreatedAt = createdAt
         };
 
