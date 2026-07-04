@@ -52,6 +52,8 @@ CREATE TABLE item_template (
     max_durability INT,                -- 유니크(무기)만. 스택형은 NULL
     icon           TEXT    NOT NULL,   -- 픽셀 스프라이트 키 (assets/items/<icon>.svg)
     base_value     BIGINT  NOT NULL,   -- 참고 시세(병뚜껑). 시드/어드민 가이드용
+    grid_w         INT     NOT NULL DEFAULT 1 CHECK (grid_w BETWEEN 1 AND 6),  -- 스태시 footprint 폭(칸)
+    grid_h         INT     NOT NULL DEFAULT 1 CHECK (grid_h BETWEEN 1 AND 6),  -- 스태시 footprint 높이(칸)
     CHECK (stackable = (max_durability IS NULL))
 );
 
@@ -76,6 +78,26 @@ CREATE TABLE item_instance (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_item_instance_owner ON item_instance(owner_player_id);
+
+-- ----------------------------------------------------------------------------
+-- 스태시 배치(그리드 인벤토리)
+--   플레이어별 N×M 스태시 위 아이템 배치. (x,y)=좌상단 칸, footprint는 템플릿의 grid_w×grid_h.
+--   스택형은 (player, template) 당 한 칸(1×1), 유니크는 인스턴스별로 배치.
+--   서버 권위 검증: 경계 밖·겹침 금지(애플리케이션 계층에서 판정).
+-- ----------------------------------------------------------------------------
+CREATE TABLE stash_placement (
+    player_id   UUID NOT NULL REFERENCES player(id),
+    kind        TEXT NOT NULL,                         -- STACK / INSTANCE
+    template_id INT  NOT NULL REFERENCES item_template(id),
+    instance_id UUID REFERENCES item_instance(id),     -- INSTANCE일 때만
+    x           INT  NOT NULL CHECK (x >= 0),
+    y           INT  NOT NULL CHECK (y >= 0),
+    -- 한 아이템은 스태시에 한 번만 배치: 스택형은 템플릿 단위, 유니크는 인스턴스 단위로 유일.
+    CONSTRAINT uq_stash_stack    UNIQUE (player_id, template_id, kind),
+    CONSTRAINT uq_stash_instance UNIQUE (instance_id),
+    CHECK ((kind = 'INSTANCE') = (instance_id IS NOT NULL))
+);
+CREATE INDEX idx_stash_player ON stash_placement(player_id);
 
 -- ----------------------------------------------------------------------------
 -- 주문서(order book) & 체결(trade)
@@ -240,6 +262,22 @@ INSERT INTO item_template
 (100,'ammo_bolt',     '석궁 볼트',        'AMMO','COMMON',  true, NULL,'ammo_shell',   5),
 (101,'ammo_arrow',    '화살',             'AMMO','COMMON',  true, NULL,'ammo_shell',   4),
 (102,'ammo_flare',    '조명탄',           'AMMO','UNCOMMON',true, NULL,'ammo_shell',  10);
+
+-- ---- 스태시 footprint(grid_w×grid_h) --------------------------------------
+-- 스택형(FOOD/MEDICAL/AMMO)은 기본 1×1. 유니크 무기만 크기를 준다.
+UPDATE item_template SET grid_w = 1, grid_h = 2
+  WHERE code IN ('kitchen_knife','combat_knife','cleaver','brass_knuckles','hatchet','machinist_hammer');
+UPDATE item_template SET grid_w = 1, grid_h = 3
+  WHERE code IN ('machete','baseball_bat','nail_bat','crowbar','fire_axe','pipe_wrench','katana',
+                 'shovel','pitchfork','police_baton','spiked_mace','wooden_spear','scythe');
+UPDATE item_template SET grid_w = 2, grid_h = 3
+  WHERE code IN ('sledgehammer','chainsaw');
+-- 총: 권총류 2×2, 소총/샷건류 4×2
+UPDATE item_template SET grid_w = 2, grid_h = 2
+  WHERE code IN ('makarov_pistol','glock_pistol','revolver','desert_eagle','flare_gun','nail_gun');
+UPDATE item_template SET grid_w = 4, grid_h = 2
+  WHERE code IN ('sawed_shotgun','pump_shotgun','double_shotgun','uzi_smg','mp5_smg','ak47_rifle',
+                 'm4_rifle','hunting_rifle','sniper_rifle','lever_rifle','crossbow','compound_bow','grenade_launcher');
 
 -- ============================================================================
 --  시드: 개발용 플레이어 3명 + 지갑 + 초기 인벤토리

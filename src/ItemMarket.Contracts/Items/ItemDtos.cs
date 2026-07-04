@@ -33,7 +33,9 @@ public sealed record ItemTemplateDto(
     bool Stackable,
     int? MaxDurability,
     string Icon,
-    long BaseValue);
+    long BaseValue,
+    int GridW = 1,
+    int GridH = 1);
 
 /// <summary>유니크 인스턴스(무기/방어구). 내구도·부착물 보유.</summary>
 public sealed record ItemInstanceDto(

@@ -19,5 +19,6 @@ public enum ErrorCode
     OrderNotFound,
     OrderNotOwned,
     OrderAlreadyClosed,     // 이미 체결완료/취소된 주문
-    StackableMismatch       // 스택형에 InstanceId 지정, 혹은 유니크에 Quantity>1 등
+    StackableMismatch,      // 스택형에 InstanceId 지정, 혹은 유니크에 Quantity>1 등
+    PlacementInvalid        // 스태시 배치 불가: 경계 밖 또는 다른 아이템과 겹침
 }
