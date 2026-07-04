@@ -20,7 +20,7 @@ set -uo pipefail
 
 API_BASE="${1:-${API_BASE:-http://localhost:5080}}"
 CHARLIE="33333333-3333-3333-3333-333333333333"   # Trader_Charlie (admin)
-TOPUP=30000                                       # 매수 에스크로 여유분(런당)
+TOPUP=120000                                      # 매수 에스크로 여유분(런당, 전 종목 bid 커버)
 
 command -v jq >/dev/null || { echo "오류: jq가 필요합니다 (brew install jq)"; exit 1; }
 
@@ -76,26 +76,12 @@ must POST /api/admin/wallet/adjust \
   "{\"playerId\":\"$CHARLIE\",\"delta\":$TOPUP,\"reason\":\"seed-market: market maker top-up\"}" >/dev/null
 echo "[seed] 지갑 충전 +$TOPUP CAP"
 
-# ---- 3) 스택형 인기 템플릿: 재고 지급 + 3단 매도 / 2단 매수 -------------------
-# 형식: templateId|기준가(base_value 근사)
-STACKABLES=(
-  "1|8"     # 통조림 콩 (FOOD)
-  "8|20"    # 육포 (FOOD)
-  "15|6"    # 생수 (FOOD)
-  "25|45"   # 전투식량 MRE (FOOD)
-  "31|12"   # 붕대 (MEDICAL)
-  "34|25"   # 진통제 (MEDICAL)
-  "35|60"   # 항생제 (MEDICAL)
-  "39|120"  # 구급상자 (MEDICAL)
-  "93|4"    # 9mm 탄약 (AMMO)
-  "95|8"    # 7.62mm 탄약 (AMMO)
-  "96|8"    # 5.56mm 탄약 (AMMO)
-  "97|7"    # 12게이지 산탄 (AMMO)
-)
+# ---- 3) 스택형 전 종목: 재고 지급 + 3단 매도 / 2단 매수 ----------------------
+# 카탈로그에서 stackable 전 종목(FOOD/MEDICAL/AMMO)을 실제 base_value로 자동 커버.
+CATALOG=$(req GET /api/catalog)
 
 SEEDED_TIDS=()
-for entry in "${STACKABLES[@]}"; do
-  tid=${entry%%|*}; base=${entry##*|}
+while IFS='|' read -r tid base; do
   SEEDED_TIDS+=("$tid")
 
   # 매도 60개 분량 재고 지급 (30+20+10)
@@ -117,14 +103,30 @@ for entry in "${STACKABLES[@]}"; do
   place_order Buy "$tid" "$b2" 30
 
   echo "[seed] tid=$tid  asks: $s1/$s2/$s3  bids: $b1/$b2"
-done
+done < <(jq -r '.data[] | select(.stackable) | "\(.id)|\(.baseValue)"' <<<"$CATALOG")
 
 # ---- 4) 유니크(MELEE/GUN) 인스턴스: 지급 후 개당 매도 -------------------------
 # 형식: templateId|판매가|내구도|부착물(JSON)
 UNIQUES=(
   "54|140|85|[]"                              # 전투용 나이프
+  "55|165|100|[]"                             # 마체테
+  "57|100|52|[]"                              # 못 박힌 방망이
+  "58|120|185|[]"                             # 쇠지렛대
   "59|250|130|[]"                             # 소방도끼
+  "61|220|165|[]"                             # 대형 해머
+  "63|660|112|[]"                             # 카타나
+  "67|760|72|[]"                              # 전기톱
+  "70|285|98|[]"                              # 철퇴
+  "74|760|270|[]"                             # 마카로프 권총
   "75|1100|320|[\"suppressor\"]"              # 글록 권총
+  "77|2300|285|[\"extended_mag\"]"            # 데저트 이글
+  "78|1150|235|[]"                            # 소드오프 샷건
+  "80|1400|255|[]"                            # 더블배럴 샷건
+  "82|3300|380|[\"red_dot\"]"                 # MP5 기관단총
+  "83|4700|465|[\"red_dot\",\"extended_mag\"]" # AK-47 소총
+  "86|8500|385|[\"scope\"]"                   # 저격소총
+  "88|320|110|[]"                             # 조명탄 발사기
+  "90|950|235|[]"                             # 석궁
 )
 
 for entry in "${UNIQUES[@]}"; do
