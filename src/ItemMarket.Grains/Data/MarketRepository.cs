@@ -520,6 +520,13 @@ public sealed class MarketRepository(string connectionString)
         await using var tx = await db.BeginTransactionAsync();
         try
         {
+            // 0) 데드락 방지: 이 트랜잭션이 건드릴 지갑 행을 player_id 오름차순으로 미리 잠근다.
+            //    서로 다른 OrderBookGrain의 동시 정산이 매수자/판매자 지갑을 '서로 다른 순서'로
+            //    잠가 생기던 Postgres 교착(40P01)을 일관된 락 순서로 제거한다.
+            await db.ExecuteAsync(
+                "SELECT player_id FROM wallet WHERE player_id = ANY(@ids) ORDER BY player_id FOR UPDATE",
+                new { ids = new[] { a.BuyerId, a.SellerId } }, tx);
+
             // 1) 체결 기록
             await db.ExecuteAsync(
                 @"INSERT INTO trade
