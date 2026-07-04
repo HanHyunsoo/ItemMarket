@@ -45,13 +45,13 @@ function open(templateId: number) {
 
     <h3 class="wx-section-title">Stacks</h3>
     <div class="grid">
-      <button
-        v-for="s in stacks"
-        :key="s.templateId"
-        class="stack"
-        @click="open(s.templateId)"
-      >
-        <ItemSprite :icon="s.tpl?.icon" :category="s.tpl?.category" :rarity="s.tpl?.rarity" :size="44" />
+      <button v-for="s in stacks" :key="s.templateId" class="stack" @click="open(s.templateId)">
+        <ItemSprite
+          :icon="s.tpl?.icon"
+          :category="s.tpl?.category"
+          :rarity="s.tpl?.rarity"
+          :size="44"
+        />
         <div class="stack-body">
           <div class="stack-name">{{ s.tpl?.name ?? `#${s.templateId}` }}</div>
           <RarityTag v-if="s.tpl" :rarity="s.tpl.rarity" />
@@ -67,18 +67,35 @@ function open(templateId: number) {
     <h3 class="wx-section-title" style="margin-top: 28px">Unique Gear</h3>
     <div class="instances">
       <div v-for="i in instances" :key="i.id" class="instance" @click="open(i.templateId)">
-        <ItemSprite :icon="i.tpl?.icon" :category="i.tpl?.category" :rarity="i.tpl?.rarity" :size="48" />
+        <ItemSprite
+          :icon="i.tpl?.icon"
+          :category="i.tpl?.category"
+          :rarity="i.tpl?.rarity"
+          :size="48"
+        />
         <div class="instance-body">
           <div class="stack-name">{{ i.tpl?.name ?? `#${i.templateId}` }}</div>
-          <div class="instance-meta wx-muted mono">id {{ shortId(i.id) }} · {{ dateTime(i.acquiredAt) }}</div>
-          <div class="attach" v-if="i.attachments.length">
+          <div class="instance-meta wx-muted mono">
+            id {{ shortId(i.id) }} · {{ dateTime(i.acquiredAt) }}
+          </div>
+          <div v-if="i.attachments.length" class="attach">
             <el-tag v-for="a in i.attachments" :key="a" size="small" effect="plain">{{ a }}</el-tag>
           </div>
         </div>
         <div v-if="i.durability !== null" class="dur">
           <el-progress
             type="dashboard"
-            :percentage="Math.max(0, Math.min(100, i.tpl?.maxDurability ? Math.round((i.durability / i.tpl.maxDurability) * 100) : i.durability))"
+            :percentage="
+              Math.max(
+                0,
+                Math.min(
+                  100,
+                  i.tpl?.maxDurability
+                    ? Math.round((i.durability / i.tpl.maxDurability) * 100)
+                    : i.durability,
+                ),
+              )
+            "
             :width="52"
             :stroke-width="6"
           >

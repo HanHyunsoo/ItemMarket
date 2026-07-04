@@ -29,7 +29,7 @@ const boxStyle = computed(() => {
     const edge = rarityGlow(props.rarity, 0.38)
     style.background = `radial-gradient(circle at 50% 42%, ${glow}, transparent 72%), linear-gradient(160deg, var(--wx-panel-2), var(--wx-inset))`
     style.borderColor = edge
-    style.boxShadow = `inset 0 0 ${Math.round(props.size * 0.4)}px ${rarityGlow(props.rarity, 0.10)}`
+    style.boxShadow = `inset 0 0 ${Math.round(props.size * 0.4)}px ${rarityGlow(props.rarity, 0.1)}`
   }
   return style
 })
@@ -54,7 +54,7 @@ const imgStyle = computed(() => ({ width: `${props.size}px`, height: `${props.si
 }
 .sprite-box.bare {
   border-color: transparent !important;
-  background: radial-gradient(circle at 50% 45%, rgba(224, 163, 60, 0.10), transparent 70%);
+  background: radial-gradient(circle at 50% 45%, rgba(224, 163, 60, 0.1), transparent 70%);
   box-shadow: none !important;
 }
 </style>

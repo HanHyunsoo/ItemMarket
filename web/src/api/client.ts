@@ -57,18 +57,30 @@ function toApiError(err: unknown): { error: ApiError; status: number } {
     return { error: envError, status }
   }
   if (status === 401) {
-    return { error: { code: 'Unauthorized', message: 'Session expired. Please sign in again.' }, status }
-  }
-  if (status === 403) {
-    return { error: { code: 'Forbidden', message: 'You do not have permission to do that.' }, status }
-  }
-  if (status === 0) {
     return {
-      error: { code: 'Unknown', message: 'Cannot reach the exchange server. Is the backend running?' },
+      error: { code: 'Unauthorized', message: 'Session expired. Please sign in again.' },
       status,
     }
   }
-  return { error: { code: 'Unknown', message: ax.message || `Request failed (${status}).` }, status }
+  if (status === 403) {
+    return {
+      error: { code: 'Forbidden', message: 'You do not have permission to do that.' },
+      status,
+    }
+  }
+  if (status === 0) {
+    return {
+      error: {
+        code: 'Unknown',
+        message: 'Cannot reach the exchange server. Is the backend running?',
+      },
+      status,
+    }
+  }
+  return {
+    error: { code: 'Unknown', message: ax.message || `Request failed (${status}).` },
+    status,
+  }
 }
 
 // Central unwrap: returns ApiResponse<T>.data or throws ApiClientError.
@@ -79,7 +91,10 @@ async function request<T>(config: AxiosRequestConfig): Promise<T> {
     if (body && body.success) {
       return body.data as T
     }
-    const error = body?.error ?? { code: 'Unknown' as const, message: 'Unexpected response from server.' }
+    const error = body?.error ?? {
+      code: 'Unknown' as const,
+      message: 'Unexpected response from server.',
+    }
     throw new ApiClientError(error, res.status)
   } catch (err) {
     if (err instanceof ApiClientError) {
@@ -93,7 +108,8 @@ async function request<T>(config: AxiosRequestConfig): Promise<T> {
 }
 
 export const api = {
-  get: <T>(url: string, params?: Record<string, unknown>) => request<T>({ method: 'GET', url, params }),
+  get: <T>(url: string, params?: Record<string, unknown>) =>
+    request<T>({ method: 'GET', url, params }),
   post: <T>(url: string, data?: unknown) => request<T>({ method: 'POST', url, data }),
   put: <T>(url: string, data?: unknown) => request<T>({ method: 'PUT', url, data }),
   del: <T>(url: string) => request<T>({ method: 'DELETE', url }),

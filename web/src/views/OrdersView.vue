@@ -31,7 +31,9 @@ async function load() {
 onMounted(load)
 
 const visible = computed(() =>
-  orders.value.filter((o) => showClosed.value || o.status === 'Open' || o.status === 'PartiallyFilled'),
+  orders.value.filter(
+    (o) => showClosed.value || o.status === 'Open' || o.status === 'PartiallyFilled',
+  ),
 )
 
 function isCancellable(o: OrderDto): boolean {
@@ -76,22 +78,36 @@ function name(templateId: number): string {
     </div>
 
     <div class="wx-panel">
-      <el-table v-loading="loading" :data="visible" empty-text="No contracts on the wire — place one from the market">
+      <el-table
+        v-loading="loading"
+        :data="visible"
+        empty-text="No contracts on the wire — place one from the market"
+      >
         <el-table-column label="Item" min-width="180">
           <template #default="{ row }">
-            <div class="item-cell" @click="router.push({ name: 'item', params: { id: row.itemTemplateId } })">
+            <div
+              class="item-cell"
+              @click="router.push({ name: 'item', params: { id: row.itemTemplateId } })"
+            >
               <span class="link">{{ name(row.itemTemplateId) }}</span>
-              <RarityTag v-if="catalog.get(row.itemTemplateId)" :rarity="catalog.get(row.itemTemplateId)!.rarity" />
+              <RarityTag
+                v-if="catalog.get(row.itemTemplateId)"
+                :rarity="catalog.get(row.itemTemplateId)!.rarity"
+              />
             </div>
           </template>
         </el-table-column>
         <el-table-column label="Side" width="80">
           <template #default="{ row }">
-            <span :class="row.side === 'Buy' ? 'buy' : 'sell'" class="side mono">{{ row.side.toUpperCase() }}</span>
+            <span :class="row.side === 'Buy' ? 'buy' : 'sell'" class="side mono">{{
+              row.side.toUpperCase()
+            }}</span>
           </template>
         </el-table-column>
         <el-table-column label="Price" align="right" width="110">
-          <template #default="{ row }"><span class="mono">{{ caps(row.unitPrice) }}</span></template>
+          <template #default="{ row }"
+            ><span class="mono">{{ caps(row.unitPrice) }}</span></template
+          >
         </el-table-column>
         <el-table-column label="Remaining / Qty" align="right" width="140">
           <template #default="{ row }">
@@ -100,14 +116,20 @@ function name(templateId: number): string {
         </el-table-column>
         <el-table-column label="Status" width="140">
           <template #default="{ row }">
-            <el-tag :type="orderStatusType(row.status)" effect="dark" size="small">{{ row.status }}</el-tag>
+            <el-tag :type="orderStatusType(row.status)" effect="dark" size="small">{{
+              row.status
+            }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="Instance" width="110">
-          <template #default="{ row }"><span class="mono wx-muted">{{ shortId(row.instanceId) }}</span></template>
+          <template #default="{ row }"
+            ><span class="mono wx-muted">{{ shortId(row.instanceId) }}</span></template
+          >
         </el-table-column>
         <el-table-column label="Created" width="130">
-          <template #default="{ row }"><span class="wx-muted">{{ dateTime(row.createdAt) }}</span></template>
+          <template #default="{ row }"
+            ><span class="wx-muted">{{ dateTime(row.createdAt) }}</span></template
+          >
         </el-table-column>
         <el-table-column label="" width="100" align="right">
           <template #default="{ row }">

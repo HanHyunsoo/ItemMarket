@@ -50,15 +50,13 @@ function open(id: number) {
 <template>
   <div>
     <h1 class="wx-page-title">Market</h1>
-    <p class="wx-page-sub">{{ items.length }} salvage templates — pick a crate to open its order book</p>
+    <p class="wx-page-sub">
+      {{ items.length }} salvage templates — pick a crate to open its order book
+    </p>
 
     <div class="filters">
       <div class="chips">
-        <button
-          class="wx-chip"
-          :class="{ active: category === '' }"
-          @click="category = ''"
-        >
+        <button class="wx-chip" :class="{ active: category === '' }" @click="category = ''">
           All <span class="chip-count">{{ countFor('') }}</span>
         </button>
         <button

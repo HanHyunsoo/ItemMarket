@@ -7,12 +7,7 @@ import ItemSprite from '@/components/ItemSprite.vue'
 import RarityTag from '@/components/RarityTag.vue'
 import { caps, dateTime, shortId } from '@/utils/format'
 import { toastError, toastSuccess } from '@/utils/toast'
-import type {
-  ItemInstanceDto,
-  OrderBookSnapshotDto,
-  OrderSide,
-  TradeDto,
-} from '@/api/types'
+import type { ItemInstanceDto, OrderBookSnapshotDto, OrderSide, TradeDto } from '@/api/types'
 
 const props = defineProps<{ id: number }>()
 const router = useRouter()
@@ -155,10 +150,17 @@ function instanceLabel(i: ItemInstanceDto): string {
 
 <template>
   <div v-if="template">
-    <button class="back mono" @click="router.push({ name: 'market' })">&larr; BACK TO MARKET</button>
+    <button class="back mono" @click="router.push({ name: 'market' })">
+      &larr; BACK TO MARKET
+    </button>
 
     <div class="head">
-      <ItemSprite :icon="template.icon" :category="template.category" :rarity="template.rarity" :size="72" />
+      <ItemSprite
+        :icon="template.icon"
+        :category="template.category"
+        :rarity="template.rarity"
+        :size="72"
+      />
       <div>
         <h1 class="wx-page-title">{{ template.name }}</h1>
         <div class="head-meta">
@@ -180,16 +182,14 @@ function instanceLabel(i: ItemInstanceDto): string {
           <h3 class="wx-section-title">Order Book</h3>
           <div class="spread mono">
             <span class="wx-buy">BID {{ bestBid !== null ? caps(bestBid) : '—' }}</span>
-            <span class="wx-muted" v-if="spread !== null">Δ {{ caps(spread) }}</span>
+            <span v-if="spread !== null" class="wx-muted">Δ {{ caps(spread) }}</span>
             <span class="wx-sell">ASK {{ bestAsk !== null ? caps(bestAsk) : '—' }}</span>
           </div>
         </div>
         <div v-loading="loadingBook" class="book mono">
           <div class="book-col">
             <div class="book-h wx-buy">BIDS · BUY</div>
-            <div class="ladder-head">
-              <span>ORD</span><span>QTY</span><span>PRICE</span>
-            </div>
+            <div class="ladder-head"><span>ORD</span><span>QTY</span><span>PRICE</span></div>
             <div
               v-for="lvl in book?.bids ?? []"
               :key="'b' + lvl.unitPrice"
@@ -204,9 +204,7 @@ function instanceLabel(i: ItemInstanceDto): string {
           </div>
           <div class="book-col">
             <div class="book-h wx-sell right">ASKS · SELL</div>
-            <div class="ladder-head ask">
-              <span>PRICE</span><span>QTY</span><span>ORD</span>
-            </div>
+            <div class="ladder-head ask"><span>PRICE</span><span>QTY</span><span>ORD</span></div>
             <div
               v-for="lvl in book?.asks ?? []"
               :key="'a' + lvl.unitPrice"
@@ -244,7 +242,13 @@ function instanceLabel(i: ItemInstanceDto): string {
 
         <div class="field">
           <label>Unit price (caps)</label>
-          <el-input-number v-model="form.unitPrice" :min="1" :step="1" controls-position="right" style="width: 100%" />
+          <el-input-number
+            v-model="form.unitPrice"
+            :min="1"
+            :step="1"
+            controls-position="right"
+            style="width: 100%"
+          />
         </div>
 
         <div v-if="isUnique && form.side === 'Sell'" class="field">
@@ -263,12 +267,23 @@ function instanceLabel(i: ItemInstanceDto): string {
         </div>
         <div v-else class="field">
           <label>Quantity</label>
-          <el-input-number v-model="form.quantity" :min="1" :step="1" controls-position="right" style="width: 100%" />
+          <el-input-number
+            v-model="form.quantity"
+            :min="1"
+            :step="1"
+            controls-position="right"
+            style="width: 100%"
+          />
         </div>
 
         <div class="est mono">
           <span class="wx-muted">EST. TOTAL</span>
-          <span class="est-val">{{ caps(form.unitPrice * (isUnique && form.side === 'Sell' ? 1 : form.quantity)) }} caps</span>
+          <span class="est-val"
+            >{{
+              caps(form.unitPrice * (isUnique && form.side === 'Sell' ? 1 : form.quantity))
+            }}
+            caps</span
+          >
         </div>
 
         <el-button
@@ -285,18 +300,31 @@ function instanceLabel(i: ItemInstanceDto): string {
       <!-- Recent trades -->
       <section class="wx-panel trades">
         <h3 class="wx-section-title">Recent Trades</h3>
-        <el-table v-loading="loadingTrades" :data="trades" size="small" empty-text="No trades yet — the book is waiting">
+        <el-table
+          v-loading="loadingTrades"
+          :data="trades"
+          size="small"
+          empty-text="No trades yet — the book is waiting"
+        >
           <el-table-column label="Time" width="130">
-            <template #default="{ row }"><span class="mono wx-muted">{{ dateTime(row.executedAt) }}</span></template>
+            <template #default="{ row }"
+              ><span class="mono wx-muted">{{ dateTime(row.executedAt) }}</span></template
+            >
           </el-table-column>
           <el-table-column label="Price" align="right">
-            <template #default="{ row }"><span class="mono wx-amber">{{ caps(row.unitPrice) }}</span></template>
+            <template #default="{ row }"
+              ><span class="mono wx-amber">{{ caps(row.unitPrice) }}</span></template
+            >
           </el-table-column>
           <el-table-column label="Qty" align="right">
-            <template #default="{ row }"><span class="mono">{{ row.quantity }}</span></template>
+            <template #default="{ row }"
+              ><span class="mono">{{ row.quantity }}</span></template
+            >
           </el-table-column>
           <el-table-column label="Fee" align="right">
-            <template #default="{ row }"><span class="mono wx-muted">{{ caps(row.feeAmount) }}</span></template>
+            <template #default="{ row }"
+              ><span class="mono wx-muted">{{ caps(row.feeAmount) }}</span></template
+            >
           </el-table-column>
         </el-table>
       </section>
@@ -420,10 +448,18 @@ function instanceLabel(i: ItemInstanceDto): string {
 }
 /* depth bar: bids grow right-to-left, asks left-to-right */
 .lvl.bid {
-  background: linear-gradient(to left, rgba(109, 176, 106, 0.16) var(--depth), transparent var(--depth));
+  background: linear-gradient(
+    to left,
+    rgba(109, 176, 106, 0.16) var(--depth),
+    transparent var(--depth)
+  );
 }
 .lvl.ask {
-  background: linear-gradient(to right, rgba(208, 85, 64, 0.16) var(--depth), transparent var(--depth));
+  background: linear-gradient(
+    to right,
+    rgba(208, 85, 64, 0.16) var(--depth),
+    transparent var(--depth)
+  );
 }
 .lvl .px {
   font-weight: 700;
