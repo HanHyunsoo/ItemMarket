@@ -18,6 +18,8 @@ services:
       - pgdata:/var/lib/postgresql/data
       # ddl.sql 은 최초 1회(빈 볼륨)에만 자동 실행된다.
       - ./db/ddl.sql:/docker-entrypoint-initdb.d/01_ddl.sql:ro
+      # Orleans ADO.NET 클러스터링 스키마(멤버십). adonet 모드용. 최초 1회 자동 실행.
+      - ./db/orleans-clustering.sql:/docker-entrypoint-initdb.d/02_orleans.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U market -d item_market"]
       interval: 5s

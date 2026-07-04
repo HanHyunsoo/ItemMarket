@@ -393,7 +393,7 @@ public sealed class MarketRepository(string connectionString)
             new { orderId }, tx);
         await tx.CommitAsync();
 
-        return o with { Status = OrderStatus.Cancelled, EscrowCaps = 0 };
+        return (o with { Status = OrderStatus.Cancelled, EscrowCaps = 0 }).ToDto();
     }
 
     // ======================================================================
@@ -458,17 +458,29 @@ public sealed class MarketRepository(string connectionString)
             }
 
             // 5) 매수 주문 갱신: 잔량/상태 + 잠금 병뚜껑 차감.
-            await db.ExecuteAsync(
+            //    낙관적 동시성 가드: 갱신 직전의 잔량(= 체결 후 잔량 + 체결 수량)이
+            //    DB와 일치할 때만 갱신. 드문 이중 활성화(double-activation)로 다른
+            //    활성화가 먼저 이 체결을 반영했다면 rows=0 → 롤백하여 DB가 최종 심판이 된다.
+            var buyBefore = a.BuyRemaining + a.Quantity;
+            var buyRows = await db.ExecuteAsync(
                 @"UPDATE market_order
                   SET remaining_quantity = @rem, status = @st,
                       escrow_caps = escrow_caps - @rel, updated_at = now()
-                  WHERE id = @id",
-                new { rem = a.BuyRemaining, st = a.BuyStatus.ToDb(), rel = releasedEscrow, id = a.BuyOrderId }, tx);
+                  WHERE id = @id AND remaining_quantity = @before
+                    AND status IN ('OPEN','PARTIALLY_FILLED')",
+                new { rem = a.BuyRemaining, st = a.BuyStatus.ToDb(), rel = releasedEscrow, id = a.BuyOrderId, before = buyBefore }, tx);
+            if (buyRows != 1)
+                throw new DomainException(ErrorCode.OrderAlreadyClosed, "동시성 충돌: 매수 주문 잔량이 예상과 다릅니다.");
 
-            // 6) 매도 주문 갱신: 잔량/상태.
-            await db.ExecuteAsync(
-                "UPDATE market_order SET remaining_quantity = @rem, status = @st, updated_at = now() WHERE id = @id",
-                new { rem = a.SellRemaining, st = a.SellStatus.ToDb(), id = a.SellOrderId }, tx);
+            // 6) 매도 주문 갱신: 잔량/상태(같은 낙관적 가드).
+            var sellBefore = a.SellRemaining + a.Quantity;
+            var sellRows = await db.ExecuteAsync(
+                @"UPDATE market_order SET remaining_quantity = @rem, status = @st, updated_at = now()
+                  WHERE id = @id AND remaining_quantity = @before
+                    AND status IN ('OPEN','PARTIALLY_FILLED')",
+                new { rem = a.SellRemaining, st = a.SellStatus.ToDb(), id = a.SellOrderId, before = sellBefore }, tx);
+            if (sellRows != 1)
+                throw new DomainException(ErrorCode.OrderAlreadyClosed, "동시성 충돌: 매도 주문 잔량이 예상과 다릅니다.");
 
             await tx.CommitAsync();
         }
