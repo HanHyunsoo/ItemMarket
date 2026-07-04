@@ -26,5 +26,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # SignalR 백플레인용 Redis(다중 인스턴스 실시간 푸시). 선택 사항 — 단일 인스턴스
+  # 데모/테스트는 Redis 없이 인메모리로 동작하므로 이 서비스를 안 띄워도 무방하다.
+  # 다중 인스턴스 클러스터 데모(scripts/run-cluster.sh)에서 Redis:ConnectionString 으로
+  # 사용한다. 라이브 데모(:5080)와 포트가 겹치지 않아 함께 떠 있어도 방해되지 않는다.
+  redis:
+    image: redis:7
+    container_name: item-market-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pgdata:

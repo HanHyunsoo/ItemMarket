@@ -45,11 +45,20 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 });
 
 // SignalR(실시간 푸시) — 직렬화는 REST와 동일(enum 문자열 + camelCase). 발행기 DI.
-builder.Services.AddSignalR().AddJsonProtocol(o =>
+// Redis:ConnectionString 이 설정되면 SignalR 백플레인(StackExchangeRedis)을 붙인다.
+// 다중 인스턴스에서 REST를 처리한 인스턴스가 IHubContext 로 발행해도, 구독자가 붙은
+// 인스턴스는 다를 수 있다. 백플레인이 인스턴스 간 브로드캐스트를 중계해 크로스-인스턴스
+// 라이브 푸시가 성립한다(docs/realtime-contract.md). 비어있으면(기본) 인메모리 단일
+// 인스턴스로 기존과 완전히 동일하게 동작 → 기존 테스트/데모 불변.
+var signalR = builder.Services.AddSignalR().AddJsonProtocol(o =>
 {
     o.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     o.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
 });
+var redisConn = cfg["Redis:ConnectionString"];
+if (!string.IsNullOrWhiteSpace(redisConn))
+    signalR.AddStackExchangeRedis(redisConn);
+
 builder.Services.AddSingleton<IMarketNotifier, MarketNotifier>();
 
 // CORS (Vite 프론트) — SignalR은 자격증명(access_token) 전송 시 AllowCredentials +
