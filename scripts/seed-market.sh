@@ -76,6 +76,23 @@ must POST /api/admin/wallet/adjust \
   "{\"playerId\":\"$CHARLIE\",\"delta\":$TOPUP,\"reason\":\"seed-market: market maker top-up\"}" >/dev/null
 echo "[seed] 지갑 충전 +$TOPUP CAP"
 
+# ---- 2b) 스타터 키트: 세 플레이어 모두 그리드 스태시가 비지 않도록 기본 지급 ----
+# (마켓메이커 Charlie는 재고를 매도 에스크로로 잠그므로, 지급 없으면 그리드가 빈다.)
+STARTER_PLAYERS=(
+  "11111111-1111-1111-1111-111111111111"
+  "22222222-2222-2222-2222-222222222222"
+  "33333333-3333-3333-3333-333333333333"
+)
+for pid in "${STARTER_PLAYERS[@]}"; do
+  for pair in "1:20" "8:10" "31:25" "39:4" "93:120" "97:40"; do
+    req POST /api/admin/grant/stack "{\"playerId\":\"$pid\",\"templateId\":${pair%%:*},\"quantity\":${pair##*:}}" >/dev/null
+  done
+  req POST /api/admin/grant/instance "{\"playerId\":\"$pid\",\"templateId\":83,\"durability\":460,\"attachments\":[\"red_dot\",\"extended_mag\"]}" >/dev/null  # AK-47 4x2
+  req POST /api/admin/grant/instance "{\"playerId\":\"$pid\",\"templateId\":75,\"durability\":350,\"attachments\":[\"suppressor\"]}" >/dev/null                 # 글록 2x2
+  req POST /api/admin/grant/instance "{\"playerId\":\"$pid\",\"templateId\":54,\"durability\":90,\"attachments\":[]}" >/dev/null                                # 전투용 나이프 1x2
+done
+echo "[seed] 스타터 키트 지급(3인) — 그리드 스태시 채움"
+
 # ---- 3) 스택형 전 종목: 재고 지급 + 3단 매도 / 2단 매수 ----------------------
 # 카탈로그에서 stackable 전 종목(FOOD/MEDICAL/AMMO)을 실제 base_value로 자동 커버.
 CATALOG=$(req GET /api/catalog)
