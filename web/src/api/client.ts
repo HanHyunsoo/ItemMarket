@@ -1,7 +1,11 @@
 import axios, { AxiosError, type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import type { ApiError, ApiResponse } from './types'
 
-export const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:5080'
+// Runtime override (window.__API_BASE__, injected by the container at startup)
+// wins; otherwise the build-time VITE_API_BASE; otherwise the local-dev default.
+const runtimeBase =
+  typeof window !== 'undefined' && window.__API_BASE__ ? window.__API_BASE__ : undefined
+export const API_BASE = runtimeBase ?? import.meta.env.VITE_API_BASE ?? 'http://localhost:5080'
 
 const TOKEN_KEY = 'wx.token'
 
