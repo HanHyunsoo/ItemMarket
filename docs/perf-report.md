@@ -1,0 +1,179 @@
+# 부하 테스트 & 성능 분석 — 매칭 엔진
+
+> 대상: `OrderBookGrain`(아이템 템플릿당 단일 활성화) 매칭 엔진을 **실제 API → Orleans →
+> PostgreSQL** 경로로 부하. 목표는 (1) 처리량/지연 실측, (2) **동시성 하에서의 정합성
+> 불변식(invariant) 증명**, (3) 핫 grain 병목의 정량화와 완화 방향 제시.
+
+부하 도구: [`tools/LoadTest`](../tools/LoadTest) (`loadtest` 콘솔 앱).
+
+---
+
+## 방법론 (methodology)
+
+- **격리**: 라이브 데모(`:5080` API, `:5173` Vite, DB `item_market`)를 건드리지 않기 위해
+  같은 Postgres 컨테이너(`item-market-db`)에 **별도 DB `item_market_load`** 를 만들고
+  (`db/ddl.sql` + `db/orleans-clustering.sql` 적용), **전용 API 인스턴스**를 다른 포트로
+  기동했다: `Http__Port=5090`, `Orleans__SiloPort=11121`, `Orleans__GatewayPort=30021`,
+  `Orleans__ClusterId=item-market-load`. API는 **Release** 빌드.
+- **시딩(Npgsql 직접)**: 합성 플레이어 200명 + 지갑(각 10억 CAP) + 테스트 템플릿마다
+  대용량 재고(플레이어·템플릿당 100만 개) 지급. 매도가 항상 재고를 확보하도록. `COPY`
+  바이너리 임포트로 <200 ms에 시딩.
+- **구동(HTTP)**: `C`개의 동시 워커가 각자 플레이어 1명으로 **로그인(JWT) 1회** 후,
+  중앙가(mid=1000) ±25 대역에서 **랜덤 BUY/SELL 지정가**를 반복 등록. 좁은 대역이라
+  반대편(타 플레이어) 주문과 교차하여 **실제 체결이 발생**한다. 요청별 지연과 결과를 기록.
+- **시나리오**:
+  - `spread` — 주문을 **20개 템플릿**에 분산. 서로 다른 `OrderBookGrain`이 병렬 실행 → 스케일.
+  - `hot` — 모든 주문을 **단일 템플릿**에 집중. 그 grain의 1건씩(turn-based) 처리에 바운드.
+- 각 실행은 시작 전 도메인 상태를 초기화하고 재시딩하여 **깨끗한 baseline**에서 시작.
+  종료 후 **SQL 집계로 불변식**을 검증한다.
+
+### 하드웨어 / 환경
+
+| 항목 | 값 |
+|---|---|
+| 머신 | Apple M2 Pro, 12코어(성능 8 + 효율 4), 16 GB RAM |
+| OS | macOS 26.2 |
+| 런타임 | .NET 10 (10.0.301), Orleans 9.2.1, Npgsql 9.0.5 |
+| DB | PostgreSQL 16 (Docker, 동일 호스트) |
+| 토폴로지 | 단일 실로 co-host + 로컬 Postgres (전부 한 노드) |
+| 파라미터 | players=200, concurrency=64, duration=30s, mid=1000±25, qty 1–10, fee 5% |
+
+---
+
+## 결과 (measured)
+
+| 지표 | `spread` (20 템플릿) | `hot` (1 템플릿) |
+|---|---:|---:|
+| 주문 처리량 (orders/s) | **1,152** | **376** |
+| 체결 처리량 (trades/s) | **810** | **268** |
+| 총 주문 (30s) | 35,131 | 11,342 |
+| 총 체결 (30s) | 24,714 | 8,094 |
+| 지연 p50 | 28.5 ms | 167.3 ms |
+| 지연 p95 | 132.8 ms | 196.8 ms |
+| 지연 p99 | 972.7 ms | 279.4 ms |
+| 지연 max | 1,208.6 ms | 374.4 ms |
+| 비즈니스 오류 | 16 (0.045%) | 1 (0.009%) |
+| 전송(transport) 오류 | 0 | 0 |
+
+**핵심**: 종목을 분산하면 처리량이 **약 3.0배**(1,152 vs 376 orders/s, 810 vs 268 trades/s).
+서로 다른 템플릿의 호가창은 독립 grain이라 병렬로 흐르기 때문. 반대로 핫 종목은 단일
+grain에 직렬화되어 처리량이 바운드된다.
+
+**지연 프로파일의 반전에 주목**: 핫은 p50이 높지만(167 ms — 모든 요청이 그 grain의 순번을
+기다림) **꼬리(p99)가 오히려 낮고 안정적**(279 ms). 스프레드는 p50이 낮지만(28 ms) **p99
+꼬리가 973 ms까지 튄다**. 이유는 아래 병목 분석의 교차-grain 경합(deadlock 재수화) 때문이다.
+
+리틀의 법칙 교차검증(hot): 동시성 64 / p50 0.167s ≈ 383 req/s ≈ 실측 376 orders/s. 즉 핫에서
+클라이언트는 사실상 단일 grain 앞에 큐잉되며, grain의 실효 서비스 시간은 주문당 ≈ 2.7 ms
+(정산 트랜잭션 포함)다.
+
+---
+
+## 정합성 불변식 (correctness under load) — 헤드라인
+
+부하 종료 후 `item_market_load`에 대해 SQL로 검증. **두 시나리오 모두 전 항목 PASS.**
+
+| 불변식 | 정의 | 결과 |
+|---|---|---|
+| 음수 잔액 없음 | `count(wallet WHERE balance < 0)` == 0 | ✅ 0 |
+| **병뚜껑 보존** | `Σ wallet.balance + Σ order.escrow_caps + Σ trade.fee_amount == 최초 발행량` | ✅ diff=0 |
+| 아이템 보존 | 템플릿별 `Σ inventory + Σ 미체결 매도 잔량 == 최초 지급량` | ✅ 전 템플릿 일치 |
+| 주문 상태 정합 | `rem>qty` / `OPEN∧rem=0` / `FILLED∧rem≠0` / 잘못된 `PARTIALLY_FILLED` / `CANCELLED∧escrow≠0` 모두 0 | ✅ 전부 0 |
+
+예: spread 실행에서 최초 발행 200,000,000,000 CAP == 지갑 199,974,878,660 + 에스크로
+21,364,375 + 소각 수수료 3,756,965 (diff = 0). 즉 24,714건의 동시 체결 속에서도 **1 CAP도
+새로 발행되거나 유실되지 않았고**, 아이템도 복제/증발이 없었다.
+
+돈 보존이 성립하는 근거는 **정산이 단일 Postgres 트랜잭션**이기 때문이다. 한 체결에서
+{판매대금 지급, 수수료 소각, 매수 차익 환불, 에스크로 차감}의 순변화 합은 0이며(수수료는
+소각 sink로 별도 집계), 어떤 예외에도 트랜잭션 전체가 롤백된다.
+
+---
+
+## 병목 분석 (bottleneck analysis)
+
+### 1) 왜 핫 종목이 바운드되는가
+
+Orleans는 grain 활성화를 **클러스터 전체에서 정확히 1개**로 보장하고, 기본 non-reentrant라
+**한 번에 하나의 요청만** 처리한다. 이는 매칭의 정확성(중복 체결·이중 판매 차단)을 락 코드
+없이 얻는 대가로, **단일 종목의 처리량 상한 = 그 grain 하나의 직렬 처리 속도**가 된다는 뜻이다.
+주문당 서비스 시간은 대부분 **동기 정산 트랜잭션(SettleFill)** 이 지배한다(왕복 DB I/O).
+따라서 아무리 클라이언트를 늘려도(concurrency 64) 핫 종목은 큐만 길어질 뿐 throughput은
+평평해지고, p50 지연이 그 큐 대기시간으로 상승한다(실측 167 ms).
+
+이것은 결함이 아니라 **설계상의 정확성-처리량 트레이드오프**다. 실제 게임 경제에서 "단일
+인기 종목에 전 서버가 몰리는" 상황이 이 상한에 부딪힌다.
+
+### 2) 완화: 인기 호가창을 **가격 밴드로 샤딩**
+
+핫 grain을 깨는 표준 기법은 하나의 논리적 호가창을 **가격 구간(price band)별 여러 grain으로
+분할**하는 것이다. 키를 `templateId`에서 `(templateId, priceBand)`로 확장하면:
+
+- 서로 다른 밴드의 주문이 **병렬 매칭**되어 단일 grain 상한을 넘어선다(핫→준-스프레드화).
+- 라우팅: 테이커 주문은 자신이 교차 가능한 밴드들에만 순서대로 방문(매수는 낮은 ask 밴드부터).
+- 트레이드오프: 밴드 경계를 걸치는 주문의 라우팅/부분 이월 로직이 필요하고, 밴드별 최우선
+  호가를 모으는 **상단 집계(top-of-book aggregator)** 가 추가된다. 즉 "락 없는 단일 직렬성"의
+  단순함을 일부 내주고 병렬성을 얻는 교환.
+- 스케일아웃과 결합: 밴드 grain들은 실로 추가 시 자연히 분산 배치된다(위치 투명성).
+
+### 3) 실측에서 드러난 2차 병목 — 교차-grain DB 경합(deadlock)
+
+`spread`의 p99 꼬리(973 ms)와 16건의 500은 **grain 병렬성이 DB 계층에서 재충돌**한 결과다.
+서로 다른 템플릿의 grain이 병렬로 정산할 때, 같은 플레이어가 여러 종목을 거래하면 두 정산
+트랜잭션이 **동일한 `wallet` 행을 서로 다른 순서로 잠가** Postgres 데드락(40P01)이 난다.
+관측된 동작:
+
+- 데드락 victim 트랜잭션은 **원자적으로 롤백** → 돈/아이템 불변식은 그대로 유지(위 표가 증명).
+- 해당 grain은 `DeactivateOnIdle()` 후 예외를 던지고, **다음 요청에서 DB로부터 호가창을
+  재수화** → 자가 치유. 클라이언트에는 500 1건으로 보이고 재시도 가능.
+- 부수효과: 재수화 왕복이 p99 꼬리를 만든다. (핫 시나리오는 grain이 하나라 이런 교차 경합이
+  없어 꼬리가 오히려 짧다.)
+
+완화책(후속 과제): 정산 트랜잭션에서 **지갑 행을 항상 일관된 순서(예: playerId 정렬)로
+잠그면** 데드락을 원천 제거할 수 있다. 정확성에는 영향이 없고(이미 트랜잭션+롤백으로 안전)
+꼬리 지연과 재수화 비용만 줄이는 최적화다.
+
+---
+
+## 캐비어트 (honest caveats)
+
+- **단일 노드**: API·실로·Postgres가 모두 한 M2 Pro 위에 있다. 실제 배포에서는 실로/DB가
+  분리되고, `adonet` 클러스터링으로 실로를 늘리면 서로 다른 종목의 grain이 물리적으로 분산되어
+  스프레드 처리량이 더 오른다(단, 단일 DB가 새 상한이 됨).
+- 클라이언트(부하 도구)도 같은 머신에서 CPU/커넥션을 경쟁하므로 절대 수치는 보수적으로 볼 것.
+  상대 비교(spread vs hot, ≈3배)와 불변식 결과가 핵심 산출물이다.
+- **Debug 아님 — Release**로 API를 빌드해 측정했다(정산 경로의 JIT 최적화 반영).
+- 부하는 스택형(FOOD/MEDICAL) 템플릿만 사용(매도 재고 보장 목적). 유니크(무기) 경로는
+  인스턴스 소유권 이전이라 부하 특성이 다르며 별도 측정 대상.
+- 데드락 500은 DB 계층의 정상적 동시성 신호이며(정확성 무해), 위 3)의 락 순서화로 제거 가능.
+
+---
+
+## 재현 (reproduce)
+
+```bash
+export DOTNET_ROOT="/opt/homebrew/opt/dotnet/libexec"
+
+# 1) 격리 DB 생성 + 스키마
+docker exec item-market-db psql -U market -d postgres -c "CREATE DATABASE item_market_load;"
+docker exec -i item-market-db psql -U market -d item_market_load < db/ddl.sql
+docker exec -i item-market-db psql -U market -d item_market_load < db/orleans-clustering.sql
+
+# 2) 전용 API (다른 포트, Release, 백그라운드)
+dotnet build src/ItemMarket.Api -c Release
+Http__Port=5090 Orleans__SiloPort=11121 Orleans__GatewayPort=30021 \
+Orleans__ClusterId=item-market-load \
+ConnectionStrings__Postgres="Host=localhost;Port=5432;Database=item_market_load;Username=market;Password=market" \
+Auth__Secret="load-test-secret-0123456789-abcdefghijklmnop" \
+  dotnet run --project src/ItemMarket.Api -c Release --no-build &
+
+# 3) 부하 (spread → hot)
+PG="Host=localhost;Port=5432;Database=item_market_load;Username=market;Password=market"
+dotnet run --project tools/LoadTest -c Release -- --api http://localhost:5090 --pg "$PG" \
+  --players 200 --templates 20 --concurrency 64 --duration 30 --scenario spread
+dotnet run --project tools/LoadTest -c Release -- --api http://localhost:5090 --pg "$PG" \
+  --players 200 --templates 20 --concurrency 64 --duration 30 --scenario hot
+
+# 4) 정리: API 종료 + 부하 DB 삭제 (데모 item_market 은 그대로)
+docker exec item-market-db psql -U market -d postgres -c "DROP DATABASE item_market_load;"
+```

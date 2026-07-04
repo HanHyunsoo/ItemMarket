@@ -170,4 +170,25 @@ tools/gen-sprites.mjs       # ASCII 픽셀맵 → SVG 스프라이트 생성기 
 - **그리드 인벤토리**: N×M 스태시에 w×h 아이템 배치 — 서버 권위 배치 검증(경계·충돌)
 - **실시간 호가 푸시**: SignalR + Redis 백플레인 (폴링 → 푸시 전환 시점에 도입)
 - **운영 고도화**: rate limiting, 이상 거래 탐지(원장 기반 RMT 휴리스틱), 시세 차트
-- **부하 테스트**: 봇 클라이언트로 동시 주문 처리량 측정, 핫 grain(인기 종목) 가격대 샤딩
+- **핫 grain 가격대 샤딩**: 인기 종목 호가창을 `(templateId, priceBand)`로 분할해 단일 grain 상한 돌파 (분석: [`docs/perf-report.md`](docs/perf-report.md))
+
+---
+
+## 성능 (부하 테스트)
+
+실제 **API → Orleans → PostgreSQL** 경로를 봇 클라이언트로 부하해 처리량·지연을 실측하고,
+동시성 하에서 **돈/아이템 보존 불변식**을 SQL로 검증했다. 도구: [`tools/LoadTest`](tools/LoadTest),
+전체 분석: [`docs/perf-report.md`](docs/perf-report.md).
+
+측정(Apple M2 Pro, 단일 노드, Release, players=200 · concurrency=64 · 30s):
+
+| 시나리오 | 처리량 | 체결 | p50 | p95 | p99 |
+|---|---:|---:|---:|---:|---:|
+| **spread** (20 종목 분산) | **1,152 orders/s** | 810 trades/s | 28 ms | 133 ms | 973 ms |
+| **hot** (단일 종목 집중) | **376 orders/s** | 268 trades/s | 167 ms | 197 ms | 279 ms |
+
+- **종목 분산 시 처리량 ≈ 3.0배** — 서로 다른 `OrderBookGrain`이 병렬로 흐른다. 핫 종목은
+  단일 grain의 turn-based 직렬 처리에 바운드(정확성-처리량 트레이드오프).
+- **불변식 전 항목 PASS**: 2.4만 건 동시 체결 속에서 병뚜껑 보존(발행량 == 지갑+에스크로+소각
+  수수료, diff=0)·아이템 보존·주문 상태 정합·음수 잔액 0. 정산이 단일 Postgres 트랜잭션이라
+  가능. 완화책(가격 밴드 샤딩, 지갑 락 순서화)은 리포트 참조.
