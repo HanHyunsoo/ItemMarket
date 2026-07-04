@@ -28,6 +28,8 @@
 | GET | `/api/wallet` | - | `WalletDto` (현재 플레이어) |
 | GET | `/api/wallet/ledger?page=&size=` | - | `PagedResult<WalletLedgerEntryDto>` |
 | GET | `/api/inventory` | - | `InventoryDto` (스택 + 유니크 인스턴스) |
+| GET | `/api/stash` | - | `StashDto` (그리드 배치 + 미배치, 현재 플레이어) |
+| POST | `/api/stash/move` | `MoveStashItemRequest` | `StashDto` (이동 후 스냅샷) |
 | GET | `/api/market/{templateId}/book` | - | `OrderBookSnapshotDto` (호가창) |
 | GET | `/api/market/{templateId}/trades?page=&size=` | - | `PagedResult<TradeDto>` (체결 내역) |
 | POST | `/api/orders` | `PlaceOrderRequest` | `PlaceOrderResult` (잔여 주문 + 즉시 체결분) |
@@ -62,8 +64,23 @@
 - **부분 체결**: 남은 물량은 호가창에 잔존(`PartiallyFilled`).
 - **수수료**: 체결 시 판매 대금의 `fee_bps`(기본 5%)를 판매자 수령액에서 차감·소각(sink).
 
+## 그리드 스태시 규칙
+
+- **고정 그리드**: 플레이어당 **10칸(폭) × 12칸(높이)**. 좌상단 (0,0) 기준.
+  크기는 `StashDto.GridW/GridH`로 반환.
+- **footprint**: 아이템은 좌상단 `(x,y)`에서 템플릿의 `grid_w × grid_h` 칸을 차지한다.
+  스택형(FOOD/MEDICAL/AMMO)은 (플레이어, 템플릿)당 **1×1** 한 칸, 유니크(MELEE/GUN)는
+  인스턴스별로 템플릿 footprint(예: AK-47 4×2)를 차지한다.
+- **자동 배치**: `GET /api/stash`는 소유 아이템 중 아직 배치되지 않은 것을 좌상단→오른쪽→아래
+  순서로 스캔해 first-fit으로 자동 배치·영속화한다. 이미 배치된 아이템은 자리를 유지한다.
+  그리드가 가득 차 들어갈 자리가 없는 항목은 `Unplaced`(대기 트레이)로 반환된다.
+- **이동(`POST /api/stash/move`)**: 서버 권위 검증 — 소유권 + 경계(footprint가 그리드 안) +
+  겹침(다른 배치와 충돌 금지, 이동 대상 자신은 제외). 위반 시 `PlacementInvalid`(400).
+  플레이어당 grain 단일 활성화로 동시 이동이 직렬화된다(락 불필요).
+- 대상 지정: 스택 이동은 `Kind=Stack`+`TemplateId`, 유니크 이동은 `Kind=Instance`+`InstanceId`.
+
 ## 오류 코드 (`ErrorCode`)
 
 `ValidationError` · `PlayerNotFound` · `TemplateNotFound` · `InstanceNotFound` ·
 `InstanceNotOwned` · `InsufficientFunds` · `InsufficientQuantity` · `OrderNotFound` ·
-`OrderNotOwned` · `OrderAlreadyClosed` · `StackableMismatch`
+`OrderNotOwned` · `OrderAlreadyClosed` · `StackableMismatch` · `PlacementInvalid`

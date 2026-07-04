@@ -49,6 +49,7 @@ app.MapAuthEndpoints();
 app.MapMarketEndpoints();
 app.MapWalletEndpoints();
 app.MapInventoryEndpoints();
+app.MapStashEndpoints();
 app.MapOrderEndpoints();
 app.MapAdminEndpoints();
 
