@@ -163,6 +163,24 @@ CREATE TABLE idempotency_record (
     PRIMARY KEY (player_id, key)
 );
 
+-- ----------------------------------------------------------------------------
+-- 리프레시 토큰 (JWT 갱신 + 로테이션)
+--   짧은 액세스 토큰(기본 15분)과 함께 발급되는 긴 리프레시 토큰(기본 14일)을 저장한다.
+--   보안: 원문(raw)이 아니라 SHA-256 해시만 저장한다. DB가 유출돼도 토큰 자체는 복원 불가.
+--   로테이션: /api/auth/refresh 는 제시된 토큰을 revoked=true 로 폐기하고 새 쌍을 발급한다.
+--   재사용 탐지: 이미 revoked 된 토큰이 다시 제시되면(탈취 정황) 해당 플레이어의 전체
+--   토큰 체인을 폐기하고 401을 반환한다(애플리케이션 계층에서 판정).
+-- ----------------------------------------------------------------------------
+CREATE TABLE refresh_token (
+    id         UUID        PRIMARY KEY,
+    player_id  UUID        NOT NULL REFERENCES player(id),
+    token_hash TEXT        NOT NULL UNIQUE,       -- SHA-256(raw token) hex. 원문 미저장.
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked    BOOLEAN     NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_refresh_token_player ON refresh_token(player_id);
+
 -- ============================================================================
 --  시드: 아이템 마스터 102종
 --  category: FOOD/MEDICAL/MELEE/GUN/AMMO

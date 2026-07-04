@@ -15,6 +15,7 @@ import type {
   PagedResult,
   PlaceOrderRequest,
   PlaceOrderResult,
+  RefreshRequest,
   StashDto,
   TokenResponse,
   TradeDto,
@@ -25,6 +26,8 @@ import type {
 // ---- Auth ----
 export const authApi = {
   login: (body: LoginRequest) => api.post<TokenResponse>('/api/auth/login', body),
+  refresh: (body: RefreshRequest) => api.post<TokenResponse>('/api/auth/refresh', body),
+  logout: (body: RefreshRequest) => api.post<boolean>('/api/auth/logout', body),
 }
 
 // ---- Player-facing ----

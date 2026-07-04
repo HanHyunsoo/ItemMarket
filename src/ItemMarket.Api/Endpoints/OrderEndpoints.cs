@@ -13,7 +13,7 @@ public static class OrderEndpoints
 {
     public static IEndpointRouteBuilder MapOrderEndpoints(this IEndpointRouteBuilder app)
     {
-        var api = app.MapGroup("/api").RequireAuthorization();
+        var api = app.MapGroup("/api").RequireAuthorization().WithTags("Orders");
 
         api.MapPost("/orders", (PlaceOrderRequest req, ClaimsPrincipal u, IGrainFactory gf,
             IMarketNotifier notifier, MarketRepository repo, HttpContext ctx) =>

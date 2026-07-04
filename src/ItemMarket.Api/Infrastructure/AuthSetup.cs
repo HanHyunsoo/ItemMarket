@@ -18,7 +18,9 @@ public static class AuthSetup
         builder.Services.AddSingleton(new JwtTokenIssuer(
             signingKey, issuer, audience,
             adminPlayerId: cfg["Auth:AdminPlayerId"] ?? "33333333-3333-3333-3333-333333333333",
-            expiresMinutes: cfg.GetValue("Auth:ExpiresMinutes", 480)));
+            // 액세스 토큰은 짧게(기본 15분), 리프레시 토큰은 길게(기본 14일). 둘 다 설정 가능.
+            accessTokenMinutes: cfg.GetValue("Auth:AccessTokenMinutes", 15),
+            refreshTokenDays: cfg.GetValue("Auth:RefreshTokenDays", 14)));
 
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(o =>

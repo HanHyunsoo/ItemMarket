@@ -597,6 +597,72 @@ public sealed class MarketRepository(string connectionString)
     }
 
     // ======================================================================
+    //  리프레시 토큰 — 저장/조회/로테이션/폐기 (원문 대신 SHA-256 해시 저장)
+    // ======================================================================
+
+    /// <summary>토큰 원문의 SHA-256 해시(hex). DB에는 이 값만 저장/조회한다.</summary>
+    private static string HashToken(string rawToken)
+    {
+        var bytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(rawToken));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
+
+    /// <summary>새 리프레시 토큰(원문)을 해시해서 저장한다.</summary>
+    public async Task StoreRefreshTokenAsync(Guid id, Guid playerId, string rawToken, DateTime expiresAt)
+    {
+        await using var db = Open();
+        await db.ExecuteAsync(
+            @"INSERT INTO refresh_token(id, player_id, token_hash, expires_at)
+              VALUES (@id, @playerId, @hash, @expiresAt)",
+            new { id, playerId, hash = HashToken(rawToken), expiresAt });
+    }
+
+    /// <summary>원문 토큰으로 행을 조회한다(해시 매칭). 없으면 null.</summary>
+    public async Task<RefreshTokenRow?> GetRefreshTokenAsync(string rawToken)
+    {
+        await using var db = Open();
+        var row = await db.QuerySingleOrDefaultAsync(
+            @"SELECT id, player_id, expires_at, revoked
+              FROM refresh_token WHERE token_hash = @hash",
+            new { hash = HashToken(rawToken) });
+        return row is null
+            ? null
+            : new RefreshTokenRow((Guid)row.id, (Guid)row.player_id, (DateTime)row.expires_at, (bool)row.revoked);
+    }
+
+    /// <summary>
+    /// 로테이션의 원자적 폐기: 아직 유효(revoked=false)한 행만 폐기한다.
+    /// 폐기에 성공하면 true, 이미 폐기됐거나(동시 회전/재사용) 없으면 false.
+    /// </summary>
+    public async Task<bool> TryRevokeRefreshTokenAsync(Guid id)
+    {
+        await using var db = Open();
+        var rows = await db.ExecuteAsync(
+            "UPDATE refresh_token SET revoked = true WHERE id = @id AND revoked = false",
+            new { id });
+        return rows == 1;
+    }
+
+    /// <summary>원문 토큰으로 폐기(로그아웃). 없거나 이미 폐기여도 무해(멱등).</summary>
+    public async Task RevokeRefreshTokenAsync(string rawToken)
+    {
+        await using var db = Open();
+        await db.ExecuteAsync(
+            "UPDATE refresh_token SET revoked = true WHERE token_hash = @hash",
+            new { hash = HashToken(rawToken) });
+    }
+
+    /// <summary>플레이어의 모든 리프레시 토큰을 폐기한다(재사용 탐지 시 체인 무효화).</summary>
+    public async Task RevokeAllRefreshTokensAsync(Guid playerId)
+    {
+        await using var db = Open();
+        await db.ExecuteAsync(
+            "UPDATE refresh_token SET revoked = true WHERE player_id = @playerId AND revoked = false",
+            new { playerId });
+    }
+
+    // ======================================================================
     //  정산(SETTLEMENT) — 체결 1건을 한 트랜잭션으로 원자 처리
     //  (판매대금 지급 + 수수료 소각 + 매수 차익 환불 + 아이템 이전 +
     //   trade 기록 + 양쪽 주문 갱신). 어떤 예외에도 전부 롤백.

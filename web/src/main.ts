@@ -20,10 +20,12 @@ app.use(router)
 app.use(ElementPlus)
 
 // Global 401 handling: clear the session and bounce to market with a prompt.
+// Fires only after the axios interceptor's refresh attempt has already failed, so the
+// session is unrecoverable — clear locally (no server revoke needed) and bounce home.
 setUnauthorizedHandler(() => {
   const auth = useAuthStore()
   if (auth.isAuthenticated) {
-    auth.logout()
+    auth.clearSession()
     toastInfo('Session expired — pick a survivor to sign in.')
     router.push({ name: 'market' })
   }

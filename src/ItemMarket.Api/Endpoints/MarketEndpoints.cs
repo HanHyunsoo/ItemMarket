@@ -9,7 +9,7 @@ public static class MarketEndpoints
 {
     public static IEndpointRouteBuilder MapMarketEndpoints(this IEndpointRouteBuilder app)
     {
-        var api = app.MapGroup("/api").RequireAuthorization();
+        var api = app.MapGroup("/api").RequireAuthorization().WithTags("Market");
 
         api.MapGet("/catalog", (MarketRepository repo) => Exec(async () => await repo.GetCatalogAsync()));
 

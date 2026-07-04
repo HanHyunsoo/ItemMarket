@@ -1,5 +1,10 @@
-import axios, { AxiosError, type AxiosInstance, type AxiosRequestConfig } from 'axios'
-import type { ApiError, ApiResponse } from './types'
+import axios, {
+  AxiosError,
+  type AxiosInstance,
+  type AxiosRequestConfig,
+  type InternalAxiosRequestConfig,
+} from 'axios'
+import type { ApiResponse, ApiError, TokenResponse } from './types'
 
 // Runtime override (window.__API_BASE__, injected by the container at startup)
 // wins; otherwise the build-time VITE_API_BASE; otherwise the local-dev default.
@@ -8,6 +13,7 @@ const runtimeBase =
 export const API_BASE = runtimeBase ?? import.meta.env.VITE_API_BASE ?? 'http://localhost:5080'
 
 const TOKEN_KEY = 'wx.token'
+const REFRESH_KEY = 'wx.refresh'
 
 export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
@@ -17,6 +23,16 @@ export function setStoredToken(token: string): void {
 }
 export function clearStoredToken(): void {
   localStorage.removeItem(TOKEN_KEY)
+}
+
+export function getStoredRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_KEY)
+}
+export function setStoredRefreshToken(token: string): void {
+  localStorage.setItem(REFRESH_KEY, token)
+}
+export function clearStoredRefreshToken(): void {
+  localStorage.removeItem(REFRESH_KEY)
 }
 
 // Error thrown by the unwrap layer. Carries the domain ApiError so callers/UI
@@ -51,6 +67,65 @@ http.interceptors.request.use((config) => {
   }
   return config
 })
+
+// ---- Access-token refresh (rotation) with single-flight + one retry ----
+// A 401 on any request triggers a single /api/auth/refresh attempt; on success we
+// store the rotated pair and replay the original request once. Concurrent 401s share
+// one in-flight refresh (single-flight) so we never rotate more than once per burst.
+// The raw axios call below bypasses this interceptor, avoiding recursion.
+type RetriableConfig = InternalAxiosRequestConfig & { _retry?: boolean }
+
+let refreshInFlight: Promise<boolean> | null = null
+
+async function performRefresh(): Promise<boolean> {
+  const refreshToken = getStoredRefreshToken()
+  if (!refreshToken) return false
+  try {
+    const res = await axios.post<ApiResponse<TokenResponse>>(
+      `${API_BASE}/api/auth/refresh`,
+      { refreshToken },
+      { headers: { 'Content-Type': 'application/json' } },
+    )
+    const body = res.data
+    if (body?.success && body.data) {
+      setStoredToken(body.data.accessToken)
+      setStoredRefreshToken(body.data.refreshToken)
+      return true
+    }
+  } catch {
+    /* fall through to failure */
+  }
+  return false
+}
+
+function tryRefresh(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = performRefresh().finally(() => {
+      refreshInFlight = null
+    })
+  }
+  return refreshInFlight
+}
+
+http.interceptors.response.use(
+  (res) => res,
+  async (error: AxiosError) => {
+    const original = error.config as RetriableConfig | undefined
+    const status = error.response?.status
+    const url = original?.url ?? ''
+    // Don't try to refresh the refresh/login calls themselves, and only retry once.
+    const isAuthCall = url.includes('/api/auth/')
+    if (status === 401 && original && !original._retry && !isAuthCall && getStoredRefreshToken()) {
+      original._retry = true
+      const ok = await tryRefresh()
+      if (ok) {
+        // Request interceptor re-attaches the freshly stored access token on replay.
+        return http.request(original)
+      }
+    }
+    return Promise.reject(error)
+  },
+)
 
 function toApiError(err: unknown): { error: ApiError; status: number } {
   const ax = err as AxiosError<ApiResponse<unknown>>

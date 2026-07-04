@@ -10,7 +10,7 @@ public static class StashEndpoints
 {
     public static IEndpointRouteBuilder MapStashEndpoints(this IEndpointRouteBuilder app)
     {
-        var api = app.MapGroup("/api").RequireAuthorization();
+        var api = app.MapGroup("/api").RequireAuthorization().WithTags("Stash");
 
         api.MapGet("/stash", (ClaimsPrincipal u, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IStashGrain>(CurrentPlayer(u)).GetStash()));
