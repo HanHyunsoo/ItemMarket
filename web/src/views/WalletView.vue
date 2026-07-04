@@ -49,9 +49,11 @@ function onPage(p: number) {
     <p class="wx-page-sub">Bottle caps — the only currency that survived</p>
 
     <div class="balance wx-panel">
-      <img class="pixel cap-icon" src="/sprites/food_can.svg" alt="" />
+      <span class="cap-well">
+        <img class="pixel cap-icon" src="/sprites/cap_coin.svg" alt="" />
+      </span>
       <div>
-        <div class="balance-label">CURRENT BALANCE</div>
+        <div class="balance-label mono">CURRENT BALANCE</div>
         <div class="balance-val mono">{{ caps(wallet?.balance ?? 0) }} <span>caps</span></div>
       </div>
     </div>
@@ -95,20 +97,33 @@ function onPage(p: number) {
   display: flex;
   align-items: center;
   gap: 18px;
+  max-width: 480px;
+}
+.cap-well {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  border: 1px solid rgba(224, 163, 60, 0.35);
+  background:
+    radial-gradient(circle at 50% 40%, rgba(224, 163, 60, 0.22), transparent 72%),
+    var(--wx-inset);
+  flex: none;
 }
 .cap-icon {
-  width: 56px;
-  height: 56px;
+  width: 52px;
+  height: 52px;
 }
 .balance-label {
-  font-size: 11px;
-  letter-spacing: 2px;
+  font-size: 10px;
+  letter-spacing: 3px;
   color: var(--wx-text-dim);
 }
 .balance-val {
   font-size: 34px;
   font-weight: 800;
-  color: var(--wx-accent);
+  color: var(--wx-amber-bright);
 }
 .balance-val span {
   font-size: 14px;

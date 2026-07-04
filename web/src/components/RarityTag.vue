@@ -19,13 +19,14 @@ const color = computed(() => rarityColor(props.rarity))
 <style scoped>
 .rarity-tag {
   display: inline-block;
-  font-size: 10px;
+  font-family: var(--wx-font-display);
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  padding: 2px 8px;
+  padding: 2px 7px;
   border: 1px solid;
-  border-radius: 4px;
-  line-height: 1.4;
+  border-radius: var(--wx-r-sm);
+  line-height: 1.5;
 }
 </style>

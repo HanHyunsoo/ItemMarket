@@ -1,35 +1,128 @@
 /* ============================================================
-   WASTELAND EXCHANGE — dark, gritty survival theme
+   WASTELAND EXCHANGE — design system
+   "black-market terminal in a bunker": warm charcoal, rust/amber,
+   desaturated olive, mono display type, cheap scanline atmosphere.
    ============================================================ */
+
 :root {
-  --wx-bg: #0d0f0c;
-  --wx-bg-2: #14171340;
-  --wx-panel: #16191599;
-  --wx-panel-solid: #171a15;
-  --wx-border: #2b2f26;
-  --wx-border-strong: #3c4234;
-  --wx-text: #d7d2c4;
-  --wx-text-dim: #8a8776;
-  --wx-accent: #c8a415; /* rusted amber */
-  --wx-accent-2: #8fae4b; /* toxic green */
-  --wx-danger: #cf4b3a;
-  --wx-buy: #4f9e58;
-  --wx-sell: #cf4b3a;
+  /* ---- palette -------------------------------------------- */
+  --wx-bg: #14110b; /* warm near-black */
+  --wx-bg-deep: #0e0c07;
+  --wx-panel: #1b1712; /* raised surface */
+  --wx-panel-2: #221d15; /* hover / raised+1 */
+  --wx-inset: #100e09; /* sunken (inputs, sprite wells) */
+
+  --wx-border: #362d1e;
+  --wx-border-soft: #2a2318;
+  --wx-border-strong: #4d4029;
+
+  --wx-text: #e3dcc6; /* bone */
+  --wx-text-dim: #9c9276;
+  --wx-text-faint: #6d654e;
+
+  --wx-amber: #e0a33c; /* bottlecap amber */
+  --wx-amber-bright: #f2bd5e;
+  --wx-rust: #b5622c; /* rusted steel */
+  --wx-olive: #99a25a; /* toxic olive (secondary / admin) */
+  --wx-olive-dim: #6d7440;
+
+  --wx-buy: #6db06a;
+  --wx-buy-dim: #3d5c3c;
+  --wx-sell: #d05540;
+  --wx-sell-dim: #6b3327;
+  --wx-danger: #d05540;
+
+  /* ---- scale ----------------------------------------------- */
+  --wx-s1: 4px;
+  --wx-s2: 8px;
+  --wx-s3: 12px;
+  --wx-s4: 16px;
+  --wx-s5: 24px;
+  --wx-s6: 32px;
+
+  --wx-r-sm: 3px;
+  --wx-r: 5px;
+
+  --wx-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  --wx-shadow-lift: 0 6px 18px rgba(0, 0, 0, 0.55);
+
+  --wx-font-body: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --wx-font-display: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
 
   color-scheme: dark;
+}
 
-  /* Element Plus theme overrides */
-  --el-color-primary: #c8a415;
-  --el-bg-color: var(--wx-panel-solid);
-  --el-bg-color-overlay: #1a1e18;
-  --el-fill-color-blank: #12140f;
+/* ---- Element Plus theme ------------------------------------ */
+/* index.html sets <html class="dark">, so EP dark vars are live;
+   these overrides pull every surface into the wasteland palette. */
+:root,
+html.dark {
+  --el-color-primary: var(--wx-amber);
+  --el-color-primary-light-3: #b98330;
+  --el-color-primary-light-5: #8f6526;
+  --el-color-primary-light-7: #63461c;
+  --el-color-primary-light-8: #4d3717;
+  --el-color-primary-light-9: #382a13;
+  --el-color-primary-dark-2: var(--wx-amber-bright);
+
+  --el-color-success: var(--wx-buy);
+  --el-color-success-light-3: #55884f;
+  --el-color-success-light-5: #40603a;
+  --el-color-success-light-7: #2c402a;
+  --el-color-success-light-8: #233221;
+  --el-color-success-light-9: #1a251a;
+  --el-color-danger: var(--wx-sell);
+  --el-color-danger-light-3: #a44634;
+  --el-color-danger-light-5: #753628;
+  --el-color-danger-light-7: #4c261e;
+  --el-color-danger-light-8: #3b1f18;
+  --el-color-danger-light-9: #2a1813;
+  --el-color-error: var(--wx-sell);
+  --el-color-warning: var(--wx-rust);
+  --el-color-warning-light-3: #8f4f26;
+  --el-color-warning-light-5: #693c1f;
+  --el-color-warning-light-7: #452a18;
+  --el-color-warning-light-8: #362214;
+  --el-color-warning-light-9: #281a10;
+  --el-color-info: var(--wx-text-dim);
+  --el-color-info-light-3: #7a7159;
+  --el-color-info-light-5: #59533f;
+  --el-color-info-light-7: #3d3a2c;
+  --el-color-info-light-8: #302e23;
+  --el-color-info-light-9: #24221a;
+
+  --el-bg-color: var(--wx-panel);
+  --el-bg-color-page: var(--wx-bg);
+  --el-bg-color-overlay: #241f16;
+
+  --el-fill-color: #262015;
+  --el-fill-color-light: #221d13;
+  --el-fill-color-lighter: #1e1a11;
+  --el-fill-color-extra-light: #1a160e;
+  --el-fill-color-dark: #2b2417;
+  --el-fill-color-darker: #302818;
+  --el-fill-color-blank: var(--wx-inset);
+
   --el-text-color-primary: var(--wx-text);
   --el-text-color-regular: var(--wx-text);
   --el-text-color-secondary: var(--wx-text-dim);
+  --el-text-color-placeholder: var(--wx-text-faint);
+  --el-text-color-disabled: var(--wx-text-faint);
+
   --el-border-color: var(--wx-border);
-  --el-border-color-light: var(--wx-border);
-  --el-border-color-lighter: var(--wx-border);
-  --el-border-color-extra-light: var(--wx-border);
+  --el-border-color-light: var(--wx-border-soft);
+  --el-border-color-lighter: var(--wx-border-soft);
+  --el-border-color-extra-light: var(--wx-border-soft);
+  --el-border-color-dark: var(--wx-border-strong);
+  --el-border-color-hover: var(--wx-border-strong);
+
+  --el-border-radius-base: var(--wx-r-sm);
+  --el-box-shadow: var(--wx-shadow);
+  --el-box-shadow-light: var(--wx-shadow);
+
+  --el-mask-color: rgba(14, 12, 7, 0.75);
+  --el-disabled-bg-color: #1a160f;
 }
 
 * {
@@ -46,18 +139,52 @@ body,
 body {
   background-color: var(--wx-bg);
   background-image:
-    radial-gradient(1200px 600px at 80% -10%, #1c231733, transparent),
-    radial-gradient(900px 500px at -10% 20%, #2a1f0f22, transparent),
-    repeating-linear-gradient(0deg, #ffffff03 0, #ffffff03 1px, transparent 1px, transparent 3px);
+    radial-gradient(1100px 520px at 85% -12%, rgba(181, 98, 44, 0.07), transparent 65%),
+    radial-gradient(900px 520px at -8% 18%, rgba(109, 116, 64, 0.06), transparent 60%),
+    radial-gradient(1400px 900px at 50% 120%, rgba(0, 0, 0, 0.55), transparent 70%);
   color: var(--wx-text);
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: var(--wx-font-body);
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
 
+/* CRT scanlines + faint grain, one fixed overlay, zero assets */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.16) 0px,
+      rgba(0, 0, 0, 0.16) 1px,
+      transparent 1px,
+      transparent 4px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 244, 214, 0.012) 0px,
+      rgba(255, 244, 214, 0.012) 2px,
+      transparent 2px,
+      transparent 5px
+    );
+  mix-blend-mode: overlay;
+}
+
+/* ---- type ---------------------------------------------------- */
 .mono,
 .tabular {
-  font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, 'Consolas', monospace;
+  font-family: var(--wx-font-display);
   font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--wx-font-display);
 }
 
 /* Pixel sprites must never blur */
@@ -66,7 +193,12 @@ body {
   image-rendering: crisp-edges;
 }
 
-/* Layout shell */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ---- layout shell -------------------------------------------- */
 .wx-shell {
   min-height: 100%;
   display: flex;
@@ -77,40 +209,78 @@ body {
   width: 100%;
   max-width: 1360px;
   margin: 0 auto;
-  padding: 24px 20px 64px;
+  padding: var(--wx-s5) 20px 64px;
 }
 
 .wx-page-title {
-  font-size: 22px;
-  letter-spacing: 3px;
+  font-size: 21px;
+  letter-spacing: 4px;
   text-transform: uppercase;
   font-weight: 800;
   margin: 0 0 4px;
+  color: var(--wx-text);
+}
+.wx-page-title::before {
+  content: '// ';
+  color: var(--wx-rust);
 }
 .wx-page-sub {
   color: var(--wx-text-dim);
-  font-size: 13px;
-  margin: 0 0 20px;
+  font-size: 12px;
+  margin: 0 0 var(--wx-s5);
   letter-spacing: 1px;
+  font-family: var(--wx-font-display);
 }
 
+/* ---- panels --------------------------------------------------- */
 .wx-panel {
-  background: var(--wx-panel);
+  position: relative;
+  background: linear-gradient(180deg, var(--wx-panel-2), var(--wx-panel) 42%);
   border: 1px solid var(--wx-border);
-  border-radius: 8px;
-  padding: 16px;
-  backdrop-filter: blur(2px);
+  border-radius: var(--wx-r);
+  padding: var(--wx-s4);
+  box-shadow: var(--wx-shadow), inset 0 1px 0 rgba(255, 240, 200, 0.04);
+}
+/* riveted corner accents */
+.wx-panel::before,
+.wx-panel::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-color: var(--wx-border-strong);
+  border-style: solid;
+  pointer-events: none;
+}
+.wx-panel::before {
+  top: 3px;
+  left: 3px;
+  border-width: 1px 0 0 1px;
+}
+.wx-panel::after {
+  bottom: 3px;
+  right: 3px;
+  border-width: 0 1px 1px 0;
 }
 
 .wx-section-title {
-  font-size: 12px;
-  letter-spacing: 2px;
+  font-size: 11px;
+  letter-spacing: 3px;
   text-transform: uppercase;
-  color: var(--wx-accent);
-  margin: 0 0 12px;
+  color: var(--wx-amber);
+  margin: 0 0 var(--wx-s3);
   font-weight: 700;
+  font-family: var(--wx-font-display);
+}
+.wx-section-title::after {
+  content: '';
+  display: block;
+  margin-top: 6px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--wx-border-strong), transparent 70%);
 }
 
+/* ---- text utilities ------------------------------------------ */
 .wx-muted {
   color: var(--wx-text-dim);
 }
@@ -120,32 +290,209 @@ body {
 .wx-sell {
   color: var(--wx-sell);
 }
+.wx-amber {
+  color: var(--wx-amber);
+}
 
+/* ---- empty states --------------------------------------------- */
 .wx-empty {
-  padding: 40px 16px;
+  padding: 44px 16px;
   text-align: center;
   color: var(--wx-text-dim);
   letter-spacing: 1px;
+  font-family: var(--wx-font-display);
+  font-size: 12px;
+}
+.wx-empty .pixel {
+  display: block;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 12px;
+  opacity: 0.55;
+  filter: saturate(0.6);
 }
 
-/* Element Plus surface tweaks */
-.el-table,
-.el-table__inner-wrapper::before {
-  background: transparent;
+/* ---- filter chips ---------------------------------------------- */
+.wx-chip {
+  appearance: none;
+  background: var(--wx-inset);
+  border: 1px solid var(--wx-border);
+  color: var(--wx-text-dim);
+  font: 700 11px/1 var(--wx-font-display);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 7px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color 0.12s ease,
+    border-color 0.12s ease,
+    background 0.12s ease;
 }
+.wx-chip:hover {
+  color: var(--wx-text);
+  border-color: var(--wx-border-strong);
+}
+.wx-chip.active {
+  color: var(--wx-bg-deep);
+  background: var(--wx-amber);
+  border-color: var(--wx-amber);
+}
+
+/* ============================================================
+   Element Plus component grit
+   ============================================================ */
+
+/* tables: transparent, mono numbers, amber header text */
 .el-table {
   --el-table-bg-color: transparent;
   --el-table-tr-bg-color: transparent;
-  --el-table-header-bg-color: #1a1e1866;
-  --el-table-border-color: var(--wx-border);
-  --el-table-row-hover-bg-color: #232a1e66;
+  --el-table-header-bg-color: rgba(16, 14, 9, 0.55);
+  --el-table-header-text-color: var(--wx-text-dim);
+  --el-table-border-color: var(--wx-border-soft);
+  --el-table-row-hover-bg-color: rgba(224, 163, 60, 0.06);
+  --el-table-text-color: var(--wx-text);
+  background: transparent;
 }
+.el-table__inner-wrapper::before {
+  background: var(--wx-border-soft);
+}
+.el-table th.el-table__cell {
+  font-family: var(--wx-font-display);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.el-table .el-table__empty-text {
+  color: var(--wx-text-faint);
+  font-family: var(--wx-font-display);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+/* cards / dialogs / popovers */
 .el-card {
   --el-card-bg-color: var(--wx-panel);
   border-color: var(--wx-border);
 }
+.el-dialog,
+.el-message-box {
+  background: var(--wx-panel);
+  border: 1px solid var(--wx-border-strong);
+  border-radius: var(--wx-r);
+  box-shadow: var(--wx-shadow-lift);
+}
+.el-message-box__title {
+  font-family: var(--wx-font-display);
+  letter-spacing: 1px;
+}
+.el-popper.is-light {
+  background: var(--el-bg-color-overlay);
+  border-color: var(--wx-border-strong);
+}
 
-a {
-  color: inherit;
-  text-decoration: none;
+/* dropdown menus */
+.el-select-dropdown {
+  border-color: var(--wx-border-strong);
+}
+.el-select-dropdown__item {
+  color: var(--wx-text-dim);
+}
+.el-select-dropdown__item.is-hovering {
+  background: rgba(224, 163, 60, 0.08);
+  color: var(--wx-text);
+}
+.el-select-dropdown__item.is-selected {
+  color: var(--wx-amber);
+}
+
+/* inputs: sunken metal wells */
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner {
+  background-color: var(--wx-inset);
+  box-shadow: 0 0 0 1px var(--wx-border) inset;
+}
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--wx-amber) inset;
+}
+.el-input__inner {
+  font-family: var(--wx-font-display);
+  font-size: 13px;
+}
+.el-input-number .el-input-number__decrease,
+.el-input-number .el-input-number__increase {
+  background: var(--wx-panel-2);
+  color: var(--wx-text-dim);
+}
+
+/* buttons: blunt, uppercase mono */
+.el-button {
+  font-family: var(--wx-font-display);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-weight: 700;
+  border-radius: var(--wx-r-sm);
+}
+.el-button--primary {
+  --el-button-text-color: var(--wx-bg-deep);
+  --el-button-hover-text-color: var(--wx-bg-deep);
+}
+.el-button--success {
+  --el-button-text-color: #0c130b;
+  --el-button-hover-text-color: #0c130b;
+}
+
+/* tabs: terminal channel switcher */
+.el-tabs__nav-wrap::after {
+  height: 1px;
+  background-color: var(--wx-border);
+}
+.el-tabs__item {
+  font-family: var(--wx-font-display);
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--wx-text-dim);
+}
+.el-tabs__item.is-active {
+  color: var(--wx-amber);
+}
+.el-tabs__active-bar {
+  background-color: var(--wx-amber);
+  height: 2px;
+}
+
+/* pagination / checkbox / tags */
+.el-pagination {
+  --el-pagination-bg-color: transparent;
+  --el-pagination-button-disabled-bg-color: transparent;
+  font-family: var(--wx-font-display);
+}
+.el-pagination .el-pager li {
+  background: transparent;
+}
+.el-pagination .el-pager li.is-active {
+  color: var(--wx-amber);
+}
+.el-checkbox__label {
+  color: var(--wx-text-dim);
+}
+.el-tag {
+  font-family: var(--wx-font-display);
+  letter-spacing: 1px;
+  border-radius: var(--wx-r-sm);
+}
+
+/* loading mask + message toasts */
+.el-loading-mask {
+  background-color: rgba(14, 12, 7, 0.6);
+}
+.el-message {
+  border: 1px solid var(--wx-border-strong);
+  background: var(--el-bg-color-overlay);
+  font-family: var(--wx-font-display);
 }
