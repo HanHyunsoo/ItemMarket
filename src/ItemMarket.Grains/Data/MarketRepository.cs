@@ -21,6 +21,13 @@ public sealed class MarketRepository(string connectionString)
         return c;
     }
 
+    /// <summary>
+    /// 수수료 계산의 단일 지점. gross(체결 총액) × bps / 10000.
+    /// 중간 곱을 Int128로 수행해 long 오버플로를 차단한다(결과는 gross 이하라 안전).
+    /// </summary>
+    public static long CalcFee(long execPrice, int quantity, int feeBps)
+        => (long)((Int128)execPrice * quantity * feeBps / 10000);
+
     // ======================================================================
     //  설정 / 플레이어 / 카탈로그
     // ======================================================================
@@ -117,7 +124,13 @@ public sealed class MarketRepository(string connectionString)
             await tx.RollbackAsync();
             throw new DomainException(ErrorCode.PlayerNotFound, "지갑을 찾을 수 없습니다.");
         }
-        var after = balance.Value + delta;
+        long after;
+        try { after = checked(balance.Value + delta); }
+        catch (OverflowException)
+        {
+            await tx.RollbackAsync();
+            throw new DomainException(ErrorCode.ValidationError, "조정 결과가 잔액 표현 범위를 벗어납니다.");
+        }
         if (after < 0)
         {
             await tx.RollbackAsync();
@@ -237,14 +250,20 @@ public sealed class MarketRepository(string connectionString)
 
     public async Task<InventoryDto> AdminGrantStackAsync(Guid playerId, int templateId, int qty)
     {
+        if (qty < 1 || qty > 1_000_000)
+            throw new DomainException(ErrorCode.ValidationError, "지급 수량은 1 이상 1,000,000 이하이어야 합니다.");
         await using var db = Open();
+        await ValidateGrantTargetAsync(db, playerId, templateId, expectStackable: true);
         await UpsertStackAsync(db, null, playerId, templateId, qty);
         return await GetInventoryAsync(playerId);
     }
 
     public async Task<ItemInstanceDto> AdminGrantInstanceAsync(Guid playerId, int templateId, int? durability, IReadOnlyList<string>? attachments)
     {
+        if (durability is < 0)
+            throw new DomainException(ErrorCode.ValidationError, "내구도는 음수일 수 없습니다.");
         await using var db = Open();
+        await ValidateGrantTargetAsync(db, playerId, templateId, expectStackable: false);
         var id = Guid.NewGuid();
         var attJson = System.Text.Json.JsonSerializer.Serialize(attachments ?? []);
         var row = await db.QuerySingleAsync(
@@ -256,6 +275,26 @@ public sealed class MarketRepository(string connectionString)
             (Guid)row.id, (int)row.template_id, (int?)row.durability,
             System.Text.Json.JsonSerializer.Deserialize<List<string>>((string)row.attachments) ?? [],
             (DateTimeOffset)row.created_at);
+    }
+
+    /// <summary>어드민 지급 대상 검증: 플레이어 존재 + 템플릿 존재/스택 여부 일치.
+    /// 검증 없이는 FK/CHECK 위반이 원시 500으로 새고, 스택형 템플릿의 유령
+    /// 인스턴스(판매 불가) 같은 오염 데이터가 생긴다.</summary>
+    private async Task ValidateGrantTargetAsync(NpgsqlConnection db, Guid playerId, int templateId, bool expectStackable)
+    {
+        var playerExists = await db.ExecuteScalarAsync<bool>(
+            "SELECT EXISTS(SELECT 1 FROM player WHERE id = @playerId)", new { playerId });
+        if (!playerExists)
+            throw new DomainException(ErrorCode.PlayerNotFound, "플레이어를 찾을 수 없습니다.");
+
+        var stackable = await db.ExecuteScalarAsync<bool?>(
+            "SELECT stackable FROM item_template WHERE id = @templateId", new { templateId });
+        if (stackable is null)
+            throw new DomainException(ErrorCode.TemplateNotFound, "아이템 템플릿을 찾을 수 없습니다.");
+        if (stackable != expectStackable)
+            throw new DomainException(ErrorCode.StackableMismatch, expectStackable
+                ? "유니크 템플릿은 스택 지급이 불가합니다. grant/instance를 사용하세요."
+                : "스택형 템플릿은 인스턴스 지급이 불가합니다. grant/stack을 사용하세요.");
     }
 
     private static Task UpsertStackAsync(NpgsqlConnection db, NpgsqlTransaction? tx, Guid playerId, int templateId, int qty)
@@ -403,8 +442,8 @@ public sealed class MarketRepository(string connectionString)
     // ======================================================================
     public async Task SettleFillAsync(SettleFillArgs a)
     {
-        var gross = a.ExecPrice * a.Quantity;                 // 판매 총액
-        var fee = gross * a.FeeBps / 10000;                   // 수수료(소각) = 총액 × bps/10000
+        var gross = a.ExecPrice * a.Quantity;                 // 판매 총액(주문 검증으로 상한 보장)
+        var fee = CalcFee(a.ExecPrice, a.Quantity, a.FeeBps); // 수수료(소각) = 총액 × bps/10000, Int128 안전
         var improvement = (a.BuyLimitPrice - a.ExecPrice) * a.Quantity; // 매수 상한가 대비 차익
         var releasedEscrow = a.BuyLimitPrice * a.Quantity;    // 이 체결분에 잠겼던 매수 에스크로
 

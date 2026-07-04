@@ -143,7 +143,9 @@ static Guid CurrentPlayer(ClaimsPrincipal user)
 }
 
 // 도메인 예외를 ApiResponse 실패 봉투 + 적절한 HTTP 상태로 변환.
-static async Task<IResult> Exec<T>(Func<Task<T>> action)
+// 예상 밖 예외(NpgsqlException 등)도 봉투를 유지한 500으로 감싼다 —
+// 그렇지 않으면 프론트가 기대하는 ApiResponse 계약이 깨진 원시 500이 샌다.
+async Task<IResult> Exec<T>(Func<Task<T>> action)
 {
     try
     {
@@ -161,6 +163,12 @@ static async Task<IResult> Exec<T>(Func<Task<T>> action)
             _ => StatusCodes.Status400BadRequest
         };
         return Results.Json(ApiResponse<T>.Fail(ex.Code, ex.Message), statusCode: status);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "처리되지 않은 예외");
+        return Results.Json(ApiResponse<T>.Fail(ErrorCode.Unknown, "서버 내부 오류가 발생했습니다."),
+            statusCode: StatusCodes.Status500InternalServerError);
     }
 }
 
@@ -262,7 +270,8 @@ admin.MapPost("/orders/force-cancel", (AdminForceCancelOrderRequest req, IGrainF
 admin.MapGet("/orders", (MarketRepository repo, int? templateId, string? status, int page = 1, int size = 20) =>
     Exec(() =>
     {
-        OrderStatus? parsed = Enum.TryParse<OrderStatus>(status, ignoreCase: true, out var s) ? s : null;
+        // Enum.TryParse는 "7" 같은 숫자 문자열도 (정의 안 된 값으로) 통과시키므로 IsDefined로 걸러낸다.
+        OrderStatus? parsed = Enum.TryParse<OrderStatus>(status, ignoreCase: true, out var s) && Enum.IsDefined(s) ? s : null;
         return repo.GetOrdersAdminAsync(templateId, parsed, Math.Max(1, page), Math.Clamp(size, 1, 200));
     }));
 

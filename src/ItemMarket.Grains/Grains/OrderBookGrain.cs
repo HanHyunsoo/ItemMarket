@@ -3,6 +3,7 @@ using ItemMarket.Contracts.Orders;
 using ItemMarket.Contracts.Trades;
 using ItemMarket.Grains.Abstractions;
 using ItemMarket.Grains.Data;
+using Microsoft.Extensions.Logging;
 
 namespace ItemMarket.Grains.Grains;
 
@@ -17,8 +18,16 @@ namespace ItemMarket.Grains.Grains;
 /// 상태(호가창)는 활성화 시 Postgres에서 재수화하고, 이후 인메모리로 유지하되
 /// 모든 실제 자산 이동은 Postgres 트랜잭션으로 커밋한다(소스오브트루스=DB).
 /// </summary>
-public sealed class OrderBookGrain(MarketRepository repo) : Grain, IOrderBookGrain
+public sealed class OrderBookGrain(MarketRepository repo, ILogger<OrderBookGrain> log) : Grain, IOrderBookGrain
 {
+    // ---- 가격/수량 상한 -----------------------------------------------------
+    // long 곱셈 오버플로 방어. 상한 없이 UnitPrice×Quantity가 long을 넘으면
+    // 음수 에스크로가 되어 지갑에 병뚜껑이 "찍히는" 치명적 익스플로잇이 된다.
+    // (검증은 Int128로 수행하므로 상한 이내에서는 오버플로 자체가 불가능.)
+    internal const long MaxUnitPrice = 1_000_000_000_000;      // 1조 CAP
+    internal const int MaxQuantity = 1_000_000;                // 100만 개
+    internal const long MaxNotional = 1_000_000_000_000_000;   // 주문 총액 상한(1000조 CAP)
+
     /// <summary>호가창에 잔존하는 주문(인메모리 뷰).</summary>
     private sealed class Resting
     {
@@ -67,8 +76,14 @@ public sealed class OrderBookGrain(MarketRepository repo) : Grain, IOrderBookGra
             ?? throw new DomainException(ErrorCode.TemplateNotFound, "아이템 템플릿을 찾을 수 없습니다.");
         _stackable = tmpl.Stackable;
 
-        if (req.Quantity < 1) throw new DomainException(ErrorCode.ValidationError, "수량은 1 이상이어야 합니다.");
-        if (req.UnitPrice <= 0) throw new DomainException(ErrorCode.ValidationError, "단가는 양수여야 합니다.");
+        if (req.Quantity < 1 || req.Quantity > MaxQuantity)
+            throw new DomainException(ErrorCode.ValidationError, $"수량은 1 이상 {MaxQuantity:N0} 이하이어야 합니다.");
+        if (req.UnitPrice <= 0 || req.UnitPrice > MaxUnitPrice)
+            throw new DomainException(ErrorCode.ValidationError, $"단가는 1 이상 {MaxUnitPrice:N0} 이하이어야 합니다.");
+        // 총액(단가×수량)은 Int128로 계산해 long 오버플로를 원천 차단.
+        var notional = (Int128)req.UnitPrice * req.Quantity;
+        if (notional > MaxNotional)
+            throw new DomainException(ErrorCode.ValidationError, $"주문 총액(단가×수량)은 {MaxNotional:N0} CAP을 넘을 수 없습니다.");
 
         if (req.Side == OrderSide.Sell)
         {
@@ -95,7 +110,7 @@ public sealed class OrderBookGrain(MarketRepository repo) : Grain, IOrderBookGra
         long escrowCaps = 0;
         if (req.Side == OrderSide.Buy)
         {
-            escrowCaps = req.UnitPrice * req.Quantity;
+            escrowCaps = (long)notional; // 위에서 MaxNotional 검증됨 — 오버플로 불가
             var ok = await GrainFactory.GetGrain<IWalletGrain>(playerId).TryEscrow(escrowCaps, orderId);
             if (!ok) throw new DomainException(ErrorCode.InsufficientFunds, "병뚜껑 잔액이 부족합니다.");
         }
@@ -117,10 +132,36 @@ public sealed class OrderBookGrain(MarketRepository repo) : Grain, IOrderBookGra
         }
 
         // ---- 주문 영속화(OPEN, 전량 잔존 상태로) --------------------------
-        await repo.InsertOrderAsync(new OrderRow(
-            orderId, playerId, req.Side, TemplateId, req.UnitPrice, req.Quantity,
-            req.Quantity, req.Side == OrderSide.Sell && !_stackable ? req.InstanceId : null,
-            OrderStatus.Open, escrowCaps, createdAt));
+        // 에스크로 커밋 후 주문 INSERT가 실패하면 잠긴 자산을 되돌릴 주문이
+        // 존재하지 않게 되므로(취소 불가) 반드시 보상(compensation)으로 원복한다.
+        try
+        {
+            await repo.InsertOrderAsync(new OrderRow(
+                orderId, playerId, req.Side, TemplateId, req.UnitPrice, req.Quantity,
+                req.Quantity, req.Side == OrderSide.Sell && !_stackable ? req.InstanceId : null,
+                OrderStatus.Open, escrowCaps, createdAt));
+        }
+        catch (Exception insertEx)
+        {
+            try
+            {
+                if (req.Side == OrderSide.Buy)
+                    await GrainFactory.GetGrain<IWalletGrain>(playerId).Refund(escrowCaps, orderId);
+                else if (_stackable)
+                    await GrainFactory.GetGrain<IPlayerInventoryGrain>(playerId).ReturnStack(TemplateId, req.Quantity);
+                else
+                    await GrainFactory.GetGrain<IPlayerInventoryGrain>(playerId).ReturnInstance(req.InstanceId!.Value);
+            }
+            catch (Exception compEx)
+            {
+                // 보상까지 실패: 원장의 ORDER_ESCROW 기록(ref=orderId)으로 수동 복구 가능.
+                log.LogCritical(compEx,
+                    "주문 {OrderId} INSERT 실패 후 에스크로 보상도 실패. 수동 복구 필요 (player={PlayerId}, template={TemplateId})",
+                    orderId, playerId, TemplateId);
+            }
+            log.LogError(insertEx, "주문 {OrderId} 영속화 실패 — 에스크로 원복 시도 완료", orderId);
+            throw;
+        }
 
         var incoming = new Resting
         {
@@ -155,6 +196,7 @@ public sealed class OrderBookGrain(MarketRepository repo) : Grain, IOrderBookGra
     /// 매칭 루프. 반대편 호가를 가격-시간 우선으로 훑으며 교차하는 만큼 체결한다.
     /// 체결가 = 메이커(호가창 잔존 주문)의 가격 → 테이커에게 가격 개선(차익)이 돌아간다.
     /// 각 체결은 SettleFill로 단일 Postgres 트랜잭션 정산.
+    /// 자기 주문과는 체결하지 않는다(자전거래 방지 — 본인 주문은 건너뛰고 잔존).
     /// </summary>
     private async Task<List<TradeDto>> MatchAsync(Resting incoming)
     {
@@ -172,27 +214,45 @@ public sealed class OrderBookGrain(MarketRepository repo) : Grain, IOrderBookGra
         foreach (var maker in Candidates())
         {
             if (incoming.Remaining == 0) break;
+            if (maker.PlayerId == incoming.PlayerId) continue; // 자전거래(self-trade) 방지
 
             var qty = Math.Min(incoming.Remaining, maker.Remaining);
             var execPrice = maker.UnitPrice; // 체결은 메이커 가격에
 
             var (buy, sell) = incoming.Side == OrderSide.Buy ? (incoming, maker) : (maker, incoming);
 
-            // 잔량 선반영(정산 tx에 넘길 최종값 계산).
-            incoming.Remaining -= qty;
-            maker.Remaining -= qty;
-
-            var buyStatus = buy.Remaining == 0 ? OrderStatus.Filled : OrderStatus.PartiallyFilled;
-            var sellStatus = sell.Remaining == 0 ? OrderStatus.Filled : OrderStatus.PartiallyFilled;
+            // 체결 후 잔량을 "계산만" 해서 정산 tx에 넘기고, 인메모리 반영은
+            // 커밋 성공 후에 한다. 선반영하면 정산 실패 시 인메모리 호가창이
+            // DB와 어긋난 채 남아 이후 모든 매칭이 낙관적 가드에 걸린다.
+            var buyRemaining = buy.Remaining - qty;
+            var sellRemaining = sell.Remaining - qty;
+            var buyStatus = buyRemaining == 0 ? OrderStatus.Filled : OrderStatus.PartiallyFilled;
+            var sellStatus = sellRemaining == 0 ? OrderStatus.Filled : OrderStatus.PartiallyFilled;
             var tradeId = Guid.NewGuid();
             var executedAt = DateTimeOffset.UtcNow;
 
-            await repo.SettleFillAsync(new SettleFillArgs(
-                tradeId, TemplateId, buy.Id, sell.Id, buy.PlayerId, sell.PlayerId,
-                execPrice, qty, buy.UnitPrice, _feeBps, sell.InstanceId, _stackable,
-                buy.Remaining, buyStatus, sell.Remaining, sellStatus, executedAt));
+            try
+            {
+                await repo.SettleFillAsync(new SettleFillArgs(
+                    tradeId, TemplateId, buy.Id, sell.Id, buy.PlayerId, sell.PlayerId,
+                    execPrice, qty, buy.UnitPrice, _feeBps, sell.InstanceId, _stackable,
+                    buyRemaining, buyStatus, sellRemaining, sellStatus, executedAt));
+            }
+            catch (Exception ex)
+            {
+                // 정산 실패: DB가 소스오브트루스. 인메모리 뷰가 어긋났을 가능성이
+                // 있으므로 활성화를 버리고 다음 호출에서 DB로부터 재수화한다.
+                // (이미 커밋된 이전 fills는 유효하며 재수화에 반영된다.)
+                log.LogError(ex, "정산 실패 — 호가창 grain(template={TemplateId}) 재수화를 위해 비활성화", TemplateId);
+                DeactivateOnIdle();
+                throw;
+            }
 
-            var fee = execPrice * qty * _feeBps / 10000;
+            // 커밋 성공 후에만 인메모리 반영.
+            incoming.Remaining -= qty;
+            maker.Remaining -= qty;
+
+            var fee = MarketRepository.CalcFee(execPrice, qty, _feeBps);
             fills.Add(new TradeDto(
                 tradeId, TemplateId, execPrice, qty, buy.PlayerId, sell.PlayerId,
                 buy.Id, sell.Id, sell.InstanceId, fee, executedAt));
@@ -210,6 +270,10 @@ public sealed class OrderBookGrain(MarketRepository repo) : Grain, IOrderBookGra
     {
         var order = await repo.GetOrderAsync(orderId)
             ?? throw new DomainException(ErrorCode.OrderNotFound, "주문을 찾을 수 없습니다.");
+        // 이 grain(템플릿)의 주문이 아니면 취소 거부 — 다른 템플릿 grain의 인메모리
+        // 호가창에 잔존한 주문을 여기서 지우면 두 뷰가 어긋난다.
+        if (order.TemplateId != TemplateId)
+            throw new DomainException(ErrorCode.OrderNotFound, "이 템플릿의 주문이 아닙니다.");
         if (!isAdmin && order.PlayerId != playerId)
             throw new DomainException(ErrorCode.OrderNotOwned, "본인 주문만 취소할 수 있습니다.");
 
