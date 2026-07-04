@@ -44,6 +44,13 @@ export function rarityColor(r: ItemRarity): string {
   return RARITY_COLOR[r] ?? RARITY_COLOR.Common
 }
 
+// Rarity color with alpha (0..1) — for glows, borders, tints.
+// Single source of truth stays RARITY_COLOR above.
+export function rarityGlow(r: ItemRarity, alpha: number): string {
+  const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
+  return rarityColor(r) + a.toString(16).padStart(2, '0')
+}
+
 // ---- Order status -> Element Plus tag type ----
 export function orderStatusType(s: OrderStatus): 'info' | 'warning' | 'success' | 'danger' {
   switch (s) {
