@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCatalogStore } from '@/stores/catalog'
 import { inventoryApi, marketApi, ordersApi } from '@/api/endpoints'
@@ -7,6 +7,14 @@ import ItemSprite from '@/components/ItemSprite.vue'
 import RarityTag from '@/components/RarityTag.vue'
 import { caps, dateTime, shortId } from '@/utils/format'
 import { toastError, toastSuccess } from '@/utils/toast'
+import {
+  connectionStatus,
+  onOrderBookUpdated,
+  onTradeExecuted,
+  onWalletChanged,
+  subscribeTemplate,
+  unsubscribeTemplate,
+} from '@/realtime/marketHub'
 import type { ItemInstanceDto, OrderBookSnapshotDto, OrderSide, TradeDto } from '@/api/types'
 
 const props = defineProps<{ id: number }>()
@@ -85,6 +93,26 @@ async function refreshAll() {
   await Promise.all([loadBook(), loadTrades(), loadOwned()])
 }
 
+// ---- live updates (SignalR) ----
+const MAX_TRADES = 50
+const cleanups: Array<() => void> = []
+
+// Green when connected, amber while (re)connecting, dim when offline.
+const liveState = computed<'connected' | 'pending' | 'offline'>(() => {
+  switch (connectionStatus.value) {
+    case 'connected':
+      return 'connected'
+    case 'connecting':
+    case 'reconnecting':
+      return 'pending'
+    default:
+      return 'offline'
+  }
+})
+const liveLabel = computed(() =>
+  liveState.value === 'offline' ? 'OFFLINE' : liveState.value === 'pending' ? 'LINKING' : 'LIVE',
+)
+
 onMounted(async () => {
   try {
     await catalog.ensureLoaded()
@@ -95,6 +123,28 @@ onMounted(async () => {
     form.unitPrice = template.value.baseValue
   }
   await refreshAll()
+
+  // Push the order-book/trades for this template instead of polling.
+  cleanups.push(
+    onOrderBookUpdated((snapshot) => {
+      if (snapshot.itemTemplateId === props.id) book.value = snapshot
+    }),
+    onTradeExecuted((trade) => {
+      if (trade.itemTemplateId !== props.id) return
+      if (trades.value.some((t) => t.id === trade.id)) return
+      trades.value = [trade, ...trades.value].slice(0, MAX_TRADES)
+    }),
+    // A fill can change which instances we own (unique sell) — refresh the picker.
+    onWalletChanged(() => {
+      void loadOwned()
+    }),
+  )
+  await subscribeTemplate(props.id)
+})
+
+onUnmounted(() => {
+  void unsubscribeTemplate(props.id)
+  cleanups.forEach((off) => off())
 })
 
 // When switching to a unique SELL, force quantity 1 and require an instance.
@@ -179,7 +229,13 @@ function instanceLabel(i: ItemInstanceDto): string {
       <!-- Order book -->
       <section class="wx-panel">
         <div class="panel-head">
-          <h3 class="wx-section-title">Order Book</h3>
+          <div class="title-row">
+            <h3 class="wx-section-title">Order Book</h3>
+            <span class="live mono" :class="liveState" :title="`Realtime: ${connectionStatus}`">
+              <span class="live-dot" />
+              {{ liveLabel }}
+            </span>
+          </div>
           <div class="spread mono">
             <span class="wx-buy">BID {{ bestBid !== null ? caps(bestBid) : '—' }}</span>
             <span v-if="spread !== null" class="wx-muted">Δ {{ caps(spread) }}</span>
@@ -395,6 +451,61 @@ function instanceLabel(i: ItemInstanceDto): string {
   gap: 14px;
   font-size: 12px;
   letter-spacing: 0.5px;
+}
+
+/* ---- LIVE connection indicator ---- */
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  color: var(--wx-text-faint);
+  background: var(--wx-inset);
+  text-transform: uppercase;
+}
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--wx-text-faint);
+  flex: none;
+}
+.live.connected {
+  color: var(--wx-buy);
+  border-color: var(--wx-buy-dim);
+}
+.live.connected .live-dot {
+  background: var(--wx-buy);
+  box-shadow: 0 0 6px rgba(109, 176, 106, 0.7);
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+.live.pending {
+  color: var(--wx-amber);
+  border-color: rgba(224, 163, 60, 0.35);
+}
+.live.pending .live-dot {
+  background: var(--wx-amber);
+  box-shadow: 0 0 6px rgba(224, 163, 60, 0.7);
+  animation: live-pulse 0.9s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 /* ---- bid/ask ladder ---- */
