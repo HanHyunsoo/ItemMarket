@@ -170,7 +170,10 @@ tools/gen-sprites.mjs       # ASCII 픽셀맵 → SVG 스프라이트 생성기 
 - **그리드 인벤토리**: N×M 스태시에 w×h 아이템 배치 — 서버 권위 배치 검증(경계·충돌)
 - **실시간 호가 푸시**: SignalR + Redis 백플레인 (폴링 → 푸시 전환 시점에 도입)
 - **운영 고도화**: rate limiting, 이상 거래 탐지(원장 기반 RMT 휴리스틱), 시세 차트
-- **핫 grain 가격대 샤딩**: 인기 종목 호가창을 `(templateId, priceBand)`로 분할해 단일 grain 상한 돌파 (분석: [`docs/perf-report.md`](docs/perf-report.md))
+- **핫 grain 가격대 샤딩 ✅(구현·opt-in)**: 인기 종목 호가창을 `(templateId, priceBand)`로 분할하는
+  코디네이터+밴드 grain을 구현(`Market:PriceBandSize`, 기본 0=비활성). 핫 시나리오에서 단일 grain
+  상한을 **≈2.2× 돌파**(299→649 orders/s, p99 365→189 ms), 밴드-격리 매칭이라는 시맨틱 트레이드오프
+  포함. 측정·설계: [`docs/perf-report.md`](docs/perf-report.md)
 
 ---
 
@@ -193,4 +196,8 @@ tools/gen-sprites.mjs       # ASCII 픽셀맵 → SVG 스프라이트 생성기 
   수수료, diff=0)·아이템 보존·주문 상태 정합·음수 잔액 0. 정산이 단일 Postgres 트랜잭션이라 가능.
 - **부하테스트가 찾은 데드락 → 수정 → 재측정**: 초기 spread p99가 교차-grain 지갑 락 순서
   경합(Postgres 40P01)으로 973 ms까지 튀었다. 정산 트랜잭션에서 지갑 행을 playerId 순으로
-  미리 잠그니 **p99 973 → 175 ms(5.5배)**, 데드락 0. (핫 grain 가격밴드 샤딩은 리포트 참조.)
+  미리 잠그니 **p99 973 → 175 ms(5.5배)**, 데드락 0.
+- **가격 밴드 샤딩(opt-in)으로 핫 grain 상한 돌파**: `Market:PriceBandSize`를 켜면 코디네이터가
+  주문을 밴드별 grain으로 라우팅해 핫 종목이 **299 → 649 orders/s(≈2.2×)**, p99 **365 → 189 ms**로
+  개선(불변식 전부 PASS). 대가로 밴드 경계를 넘는 가격 개선 교차를 포기하는 밴드-격리 시맨틱을
+  택한다(엄격 전역 우선은 단일 직렬화 지점을 요구하므로 병렬성과 양자택일). 리포트 참조.
