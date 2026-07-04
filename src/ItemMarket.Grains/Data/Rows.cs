@@ -44,6 +44,9 @@ public enum EscrowInstanceOutcome { Ok, NotFound, NotOwned, TemplateMismatch }
 /// </summary>
 public sealed record IdempotencyLookup(bool Exists, string? ResponseJson);
 
+/// <summary>리프레시 토큰 행(해시 컬럼은 제외 — 조회는 해시로만 한다).</summary>
+public sealed record RefreshTokenRow(Guid Id, Guid PlayerId, DateTime ExpiresAt, bool Revoked);
+
 /// <summary>단일 체결(fill)을 원자적으로 정산하기 위한 입력 묶음.</summary>
 public sealed record SettleFillArgs(
     Guid TradeId,

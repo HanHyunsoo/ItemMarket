@@ -55,10 +55,15 @@ export interface LoginRequest {
 export interface TokenResponse {
   accessToken: string
   tokenType: string // "Bearer"
-  expiresIn: number // seconds
+  accessTokenExpiresIn: number // seconds until the access token expires
+  refreshToken: string // raw refresh token (client-held); server stores only its hash
   playerId: string
   displayName: string
   roles: string[]
+}
+
+export interface RefreshRequest {
+  refreshToken: string
 }
 
 // ---- Items / Catalog / Inventory ----

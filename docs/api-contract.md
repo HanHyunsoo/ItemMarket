@@ -3,6 +3,11 @@
 아포칼립스 익스트랙션 슈터 테마의 아이템 거래소. 모든 응답은 공통 봉투
 `ApiResponse<T>`(`Success` / `Data` / `Error`)로 감싼다. 열거형은 문자열로 직렬화한다.
 
+> **인터랙티브 문서(Swagger/OpenAPI)**: API를 띄운 뒤 [`/swagger`](http://localhost:5080/swagger)
+> 에서 모든 엔드포인트를 그룹(Auth/Market/Wallet/Orders/Stash/Inventory/Admin)별로 보고 직접
+> 호출할 수 있다. 우측 상단 **Authorize** 에 로그인으로 받은 액세스 토큰을 넣으면 JWT Bearer로
+> 보호된 엔드포인트를 시험할 수 있다.
+
 - 인증: **JWT (Bearer)**. `POST /api/auth/login` 으로 토큰 발급 → 이후 모든 요청에
   `Authorization: Bearer <token>`. 플레이어 식별은 토큰의 `sub`(playerId) 클레임을
   서버가 신뢰(헤더 스푸핑 불가). HS256 대칭키 서명.
@@ -18,10 +23,32 @@
 
 | 메서드 | 경로 | 바디 | 응답 `Data` |
 |---|---|---|---|
-| POST | `/api/auth/login` | `LoginRequest` | `TokenResponse` (AccessToken/Roles 등) |
+| POST | `/api/auth/login` | `LoginRequest` | `TokenResponse` (액세스+리프레시 쌍) |
+| POST | `/api/auth/refresh` | `RefreshRequest` | `TokenResponse` (로테이션된 새 쌍) |
+| POST | `/api/auth/logout` | `RefreshRequest` | `bool` (리프레시 토큰 폐기) |
 
 > 개발 스코프: 비밀번호 없이 시드 플레이어 ID로 로그인. 어드민 롤은 설정값
 > `Auth:AdminPlayerId`(기본 `33333333-...-333333333333` Trader_Charlie)에 부여.
+
+### 토큰 수명과 리프레시(로테이션)
+
+로그인은 **짧은 액세스 토큰**과 **긴 리프레시 토큰**을 함께 발급한다.
+
+- **액세스 토큰(JWT, HS256)**: 기본 15분(`Auth:AccessTokenMinutes`). 모든 보호 요청의
+  `Authorization: Bearer` 에 사용. `TokenResponse.accessTokenExpiresIn`(초)로 만료를 안내.
+- **리프레시 토큰**: 기본 14일(`Auth:RefreshTokenDays`). CSPRNG 256비트 난수 원문을
+  클라이언트만 보관하고, 서버 DB(`refresh_token`)에는 **SHA-256 해시만** 저장한다(원문 미저장).
+- **갱신(`POST /api/auth/refresh`)**: 제시된 리프레시 토큰을 해시로 조회해 (존재·미폐기·미만료)
+  검증한 뒤 **로테이션**한다 — 옛 토큰을 `revoked=true`로 폐기하고 **새 액세스+리프레시 쌍**을
+  발급한다. 폐기는 `revoked=false`인 행만 원자적으로 업데이트해 동시 회전 레이스를 막는다.
+- **로그아웃(`POST /api/auth/logout`)**: 제시된 리프레시 토큰을 폐기(멱등). 플레이어 전환 시에도
+  이전 세션의 토큰을 폐기한다.
+- **재사용 탐지**: 이미 폐기된(회전이 끝난) 리프레시 토큰이 다시 제시되면 탈취 정황으로 보고
+  **해당 플레이어의 리프레시 토큰 체인 전체를 폐기**한 뒤 `Unauthorized`(401)를 반환한다.
+  만료/없음/폐기된 토큰도 모두 401.
+- **프론트엔드**: axios 응답 인터셉터가 401을 만나면 리프레시를 **한 번** 시도하고 원요청을 재시도한다
+  (동시 401은 single-flight로 한 번만 회전). 리프레시 실패 시 세션을 비우고 재로그인을 요구한다.
+  SignalR `accessTokenFactory`는 저장소의 최신 액세스 토큰을 읽어 (재)연결 시 갱신분을 사용한다.
 
 ## 플레이어용 엔드포인트
 
