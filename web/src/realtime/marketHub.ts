@@ -110,7 +110,7 @@ export async function startConnection(): Promise<void> {
     .finally(() => {
       startPromise = null
     })
-  return startPromise
+  await startPromise
 }
 
 /** Stop and discard the current connection. Never throws. */
