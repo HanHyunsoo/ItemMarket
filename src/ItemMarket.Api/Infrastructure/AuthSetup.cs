@@ -36,6 +36,20 @@ public static class AuthSetup
                     NameClaimType = "name",
                     RoleClaimType = "role"
                 };
+
+                // WebSocket은 Authorization 헤더를 못 실으므로, 허브 경로(/hubs/*)에 한해
+                // ?access_token= 쿼리에서 토큰을 읽는다(docs/realtime-contract.md).
+                o.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = ctx =>
+                    {
+                        var accessToken = ctx.Request.Query["access_token"];
+                        var path = ctx.HttpContext.Request.Path;
+                        if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                            ctx.Token = accessToken;
+                        return Task.CompletedTask;
+                    }
+                };
             });
 
         builder.Services.AddAuthorizationBuilder()

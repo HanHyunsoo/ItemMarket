@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using ItemMarket.Api.Endpoints;
+using ItemMarket.Api.Hubs;
 using ItemMarket.Api.Infrastructure;
 using ItemMarket.Grains.Data;
 
@@ -31,10 +32,19 @@ builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
 });
 
-// CORS (Vite 프론트)
+// SignalR(실시간 푸시) — 직렬화는 REST와 동일(enum 문자열 + camelCase). 발행기 DI.
+builder.Services.AddSignalR().AddJsonProtocol(o =>
+{
+    o.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    o.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+});
+builder.Services.AddSingleton<IMarketNotifier, MarketNotifier>();
+
+// CORS (Vite 프론트) — SignalR은 자격증명(access_token) 전송 시 AllowCredentials +
+// 명시적 오리진이 필요하다(AllowAnyOrigin과 함께 못 쓴다).
 var corsOrigin = cfg["Cors:AllowedOrigin"] ?? "http://localhost:5173";
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
-    p.WithOrigins(corsOrigin).AllowAnyHeader().AllowAnyMethod()));
+    p.WithOrigins(corsOrigin).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
 var app = builder.Build();
 
@@ -52,6 +62,9 @@ app.MapInventoryEndpoints();
 app.MapStashEndpoints();
 app.MapOrderEndpoints();
 app.MapAdminEndpoints();
+
+// 실시간 허브 — docs/realtime-contract.md
+app.MapHub<MarketHub>("/hubs/market");
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
 
