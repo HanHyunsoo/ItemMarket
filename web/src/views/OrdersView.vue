@@ -76,7 +76,7 @@ function name(templateId: number): string {
     </div>
 
     <div class="wx-panel">
-      <el-table v-loading="loading" :data="visible" empty-text="No orders">
+      <el-table v-loading="loading" :data="visible" empty-text="No contracts on the wire — place one from the market">
         <el-table-column label="Item" min-width="180">
           <template #default="{ row }">
             <div class="item-cell" @click="router.push({ name: 'item', params: { id: row.itemTemplateId } })">
@@ -87,7 +87,7 @@ function name(templateId: number): string {
         </el-table-column>
         <el-table-column label="Side" width="80">
           <template #default="{ row }">
-            <span :class="row.side === 'Buy' ? 'wx-buy' : 'wx-sell'" class="side">{{ row.side }}</span>
+            <span :class="row.side === 'Buy' ? 'buy' : 'sell'" class="side mono">{{ row.side.toUpperCase() }}</span>
           </template>
         </el-table-column>
         <el-table-column label="Price" align="right" width="110">
@@ -142,10 +142,25 @@ function name(templateId: number): string {
   cursor: pointer;
 }
 .link:hover {
-  color: var(--wx-accent);
+  color: var(--wx-amber);
 }
 .side {
-  font-weight: 700;
-  letter-spacing: 1px;
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  padding: 2px 7px;
+  border-radius: var(--wx-r-sm);
+  border: 1px solid;
+}
+.side.buy {
+  color: var(--wx-buy);
+  border-color: var(--wx-buy-dim);
+  background: rgba(109, 176, 106, 0.08);
+}
+.side.sell {
+  color: var(--wx-sell);
+  border-color: var(--wx-sell-dim);
+  background: rgba(208, 85, 64, 0.08);
 }
 </style>

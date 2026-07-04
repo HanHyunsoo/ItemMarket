@@ -37,6 +37,21 @@ const placing = ref(false)
 
 const bestBid = computed(() => book.value?.bids[0]?.unitPrice ?? null)
 const bestAsk = computed(() => book.value?.asks[0]?.unitPrice ?? null)
+const spread = computed(() =>
+  bestBid.value !== null && bestAsk.value !== null ? bestAsk.value - bestBid.value : null,
+)
+
+// Depth bars: widest row = deepest level on either side of the book.
+const maxDepth = computed(() => {
+  const qtys = [
+    ...(book.value?.bids ?? []).map((l) => l.quantity),
+    ...(book.value?.asks ?? []).map((l) => l.quantity),
+  ]
+  return qtys.length ? Math.max(...qtys) : 1
+})
+function depthPct(qty: number): number {
+  return Math.max(4, Math.round((qty / maxDepth.value) * 100))
+}
 
 async function loadBook() {
   loadingBook.value = true
@@ -140,7 +155,7 @@ function instanceLabel(i: ItemInstanceDto): string {
 
 <template>
   <div v-if="template">
-    <button class="back" @click="router.push({ name: 'market' })">&larr; Back to market</button>
+    <button class="back mono" @click="router.push({ name: 'market' })">&larr; BACK TO MARKET</button>
 
     <div class="head">
       <ItemSprite :icon="template.icon" :category="template.category" :rarity="template.rarity" :size="72" />
@@ -149,11 +164,11 @@ function instanceLabel(i: ItemInstanceDto): string {
         <div class="head-meta">
           <RarityTag :rarity="template.rarity" />
           <span class="wx-muted">{{ template.category }}</span>
-          <span class="wx-muted">·</span>
+          <span class="sep">/</span>
           <span class="wx-muted">{{ template.stackable ? 'Stackable' : 'Unique instance' }}</span>
-          <span class="wx-muted">·</span>
+          <span class="sep">/</span>
           <span class="wx-muted">base {{ caps(template.baseValue) }} caps</span>
-          <span class="wx-muted mono">#{{ template.id }} {{ template.code }}</span>
+          <span class="wx-muted mono ref">#{{ template.id }} {{ template.code }}</span>
         </div>
       </div>
     </div>
@@ -164,38 +179,45 @@ function instanceLabel(i: ItemInstanceDto): string {
         <div class="panel-head">
           <h3 class="wx-section-title">Order Book</h3>
           <div class="spread mono">
-            <span class="wx-buy">bid {{ bestBid !== null ? caps(bestBid) : '—' }}</span>
-            <span class="wx-sell">ask {{ bestAsk !== null ? caps(bestAsk) : '—' }}</span>
+            <span class="wx-buy">BID {{ bestBid !== null ? caps(bestBid) : '—' }}</span>
+            <span class="wx-muted" v-if="spread !== null">Δ {{ caps(spread) }}</span>
+            <span class="wx-sell">ASK {{ bestAsk !== null ? caps(bestAsk) : '—' }}</span>
           </div>
         </div>
-        <div v-loading="loadingBook" class="book">
+        <div v-loading="loadingBook" class="book mono">
           <div class="book-col">
-            <div class="book-h wx-buy">BIDS (buy)</div>
-            <el-table :data="book?.bids ?? []" size="small" empty-text="No bids">
-              <el-table-column label="Price" align="right">
-                <template #default="{ row }"><span class="mono wx-buy">{{ caps(row.unitPrice) }}</span></template>
-              </el-table-column>
-              <el-table-column label="Qty" align="right">
-                <template #default="{ row }"><span class="mono">{{ row.quantity }}</span></template>
-              </el-table-column>
-              <el-table-column label="Orders" align="right">
-                <template #default="{ row }"><span class="mono wx-muted">{{ row.orderCount }}</span></template>
-              </el-table-column>
-            </el-table>
+            <div class="book-h wx-buy">BIDS · BUY</div>
+            <div class="ladder-head">
+              <span>ORD</span><span>QTY</span><span>PRICE</span>
+            </div>
+            <div
+              v-for="lvl in book?.bids ?? []"
+              :key="'b' + lvl.unitPrice"
+              class="lvl bid"
+              :style="{ '--depth': depthPct(lvl.quantity) + '%' }"
+            >
+              <span class="wx-muted">{{ lvl.orderCount }}</span>
+              <span>{{ lvl.quantity }}</span>
+              <span class="px wx-buy">{{ caps(lvl.unitPrice) }}</span>
+            </div>
+            <div v-if="!loadingBook && !(book?.bids ?? []).length" class="lvl-empty">no bids</div>
           </div>
           <div class="book-col">
-            <div class="book-h wx-sell">ASKS (sell)</div>
-            <el-table :data="book?.asks ?? []" size="small" empty-text="No asks">
-              <el-table-column label="Price" align="right">
-                <template #default="{ row }"><span class="mono wx-sell">{{ caps(row.unitPrice) }}</span></template>
-              </el-table-column>
-              <el-table-column label="Qty" align="right">
-                <template #default="{ row }"><span class="mono">{{ row.quantity }}</span></template>
-              </el-table-column>
-              <el-table-column label="Orders" align="right">
-                <template #default="{ row }"><span class="mono wx-muted">{{ row.orderCount }}</span></template>
-              </el-table-column>
-            </el-table>
+            <div class="book-h wx-sell right">ASKS · SELL</div>
+            <div class="ladder-head ask">
+              <span>PRICE</span><span>QTY</span><span>ORD</span>
+            </div>
+            <div
+              v-for="lvl in book?.asks ?? []"
+              :key="'a' + lvl.unitPrice"
+              class="lvl ask"
+              :style="{ '--depth': depthPct(lvl.quantity) + '%' }"
+            >
+              <span class="px wx-sell">{{ caps(lvl.unitPrice) }}</span>
+              <span>{{ lvl.quantity }}</span>
+              <span class="wx-muted">{{ lvl.orderCount }}</span>
+            </div>
+            <div v-if="!loadingBook && !(book?.asks ?? []).length" class="lvl-empty">no asks</div>
           </div>
         </div>
       </section>
@@ -203,10 +225,22 @@ function instanceLabel(i: ItemInstanceDto): string {
       <!-- Place order -->
       <section class="wx-panel">
         <h3 class="wx-section-title">Place Order</h3>
-        <el-radio-group v-model="form.side" class="side-toggle">
-          <el-radio-button value="Buy">BUY</el-radio-button>
-          <el-radio-button value="Sell">SELL</el-radio-button>
-        </el-radio-group>
+        <div class="side-toggle mono">
+          <button
+            class="side-btn buy"
+            :class="{ active: form.side === 'Buy' }"
+            @click="form.side = 'Buy'"
+          >
+            BUY
+          </button>
+          <button
+            class="side-btn sell"
+            :class="{ active: form.side === 'Sell' }"
+            @click="form.side = 'Sell'"
+          >
+            SELL
+          </button>
+        </div>
 
         <div class="field">
           <label>Unit price (caps)</label>
@@ -232,8 +266,9 @@ function instanceLabel(i: ItemInstanceDto): string {
           <el-input-number v-model="form.quantity" :min="1" :step="1" controls-position="right" style="width: 100%" />
         </div>
 
-        <div class="est mono wx-muted">
-          Est. total: {{ caps(form.unitPrice * (isUnique && form.side === 'Sell' ? 1 : form.quantity)) }} caps
+        <div class="est mono">
+          <span class="wx-muted">EST. TOTAL</span>
+          <span class="est-val">{{ caps(form.unitPrice * (isUnique && form.side === 'Sell' ? 1 : form.quantity)) }} caps</span>
         </div>
 
         <el-button
@@ -250,12 +285,12 @@ function instanceLabel(i: ItemInstanceDto): string {
       <!-- Recent trades -->
       <section class="wx-panel trades">
         <h3 class="wx-section-title">Recent Trades</h3>
-        <el-table v-loading="loadingTrades" :data="trades" size="small" empty-text="No trades yet">
-          <el-table-column label="Time" width="120">
-            <template #default="{ row }"><span class="wx-muted">{{ dateTime(row.executedAt) }}</span></template>
+        <el-table v-loading="loadingTrades" :data="trades" size="small" empty-text="No trades yet — the book is waiting">
+          <el-table-column label="Time" width="130">
+            <template #default="{ row }"><span class="mono wx-muted">{{ dateTime(row.executedAt) }}</span></template>
           </el-table-column>
           <el-table-column label="Price" align="right">
-            <template #default="{ row }"><span class="mono">{{ caps(row.unitPrice) }}</span></template>
+            <template #default="{ row }"><span class="mono wx-amber">{{ caps(row.unitPrice) }}</span></template>
           </el-table-column>
           <el-table-column label="Qty" align="right">
             <template #default="{ row }"><span class="mono">{{ row.quantity }}</span></template>
@@ -267,7 +302,10 @@ function instanceLabel(i: ItemInstanceDto): string {
       </section>
     </div>
   </div>
-  <div v-else class="wx-empty">Loading item…</div>
+  <div v-else class="wx-empty">
+    <img class="pixel" src="/sprites/ammo_box.svg" alt="" />
+    Loading item…
+  </div>
 </template>
 
 <style scoped>
@@ -276,77 +314,177 @@ function instanceLabel(i: ItemInstanceDto): string {
   border: none;
   color: var(--wx-text-dim);
   cursor: pointer;
-  font-size: 12px;
-  letter-spacing: 1px;
-  margin-bottom: 12px;
+  font-size: 11px;
+  letter-spacing: 2px;
+  margin-bottom: var(--wx-s3);
   padding: 0;
 }
 .back:hover {
-  color: var(--wx-accent);
+  color: var(--wx-amber);
 }
 .head {
   display: flex;
-  gap: 16px;
+  gap: var(--wx-s4);
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: var(--wx-s5);
 }
 .head-meta {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
-  margin-top: 6px;
+  margin-top: 8px;
 }
+.sep {
+  color: var(--wx-text-faint);
+}
+.ref {
+  color: var(--wx-text-faint);
+}
+
 .layout {
   display: grid;
   grid-template-columns: 1fr 340px;
-  gap: 16px;
+  gap: var(--wx-s4);
   align-items: start;
 }
 .trades {
   grid-column: 1 / -1;
 }
+
 .panel-head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .spread {
   display: flex;
   gap: 14px;
   font-size: 12px;
+  letter-spacing: 0.5px;
 }
+
+/* ---- bid/ask ladder ---- */
 .book {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  gap: 2px;
+  min-height: 120px;
 }
 .book-h {
-  font-size: 11px;
-  letter-spacing: 1.5px;
+  font-size: 10px;
+  letter-spacing: 2px;
   font-weight: 700;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
+.book-h.right {
+  text-align: right;
+}
+.book-col:first-child {
+  border-right: 1px solid var(--wx-border-soft);
+  padding-right: 10px;
+}
+.book-col:last-child {
+  padding-left: 10px;
+}
+.ladder-head,
+.lvl {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.4fr;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  text-align: right;
+}
+.ladder-head.ask,
+.lvl.ask {
+  grid-template-columns: 1.4fr 1fr 1fr;
+  text-align: left;
+}
+.ladder-head {
+  color: var(--wx-text-faint);
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--wx-border-soft);
+  margin-bottom: 4px;
+}
+.lvl {
+  position: relative;
+  border-radius: 2px;
+}
+/* depth bar: bids grow right-to-left, asks left-to-right */
+.lvl.bid {
+  background: linear-gradient(to left, rgba(109, 176, 106, 0.16) var(--depth), transparent var(--depth));
+}
+.lvl.ask {
+  background: linear-gradient(to right, rgba(208, 85, 64, 0.16) var(--depth), transparent var(--depth));
+}
+.lvl .px {
+  font-weight: 700;
+}
+.lvl-empty {
+  padding: 18px 8px;
+  text-align: center;
+  color: var(--wx-text-faint);
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+
+/* ---- BUY / SELL toggle ---- */
 .side-toggle {
-  margin-bottom: 16px;
-  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: var(--wx-s4);
 }
-.side-toggle :deep(.el-radio-button) {
-  width: 50%;
+.side-btn {
+  appearance: none;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-inset);
+  color: var(--wx-text-dim);
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 3px;
+  padding: 10px 0;
+  border-radius: var(--wx-r-sm);
+  cursor: pointer;
+  transition: all 0.12s ease;
 }
-.side-toggle :deep(.el-radio-button__inner) {
-  width: 100%;
+.side-btn.buy:hover {
+  color: var(--wx-buy);
+  border-color: var(--wx-buy-dim);
 }
+.side-btn.sell:hover {
+  color: var(--wx-sell);
+  border-color: var(--wx-sell-dim);
+}
+.side-btn.buy.active {
+  background: rgba(109, 176, 106, 0.14);
+  border-color: var(--wx-buy);
+  color: var(--wx-buy);
+  box-shadow: inset 0 0 12px rgba(109, 176, 106, 0.12);
+}
+.side-btn.sell.active {
+  background: rgba(208, 85, 64, 0.14);
+  border-color: var(--wx-sell);
+  color: var(--wx-sell);
+  box-shadow: inset 0 0 12px rgba(208, 85, 64, 0.12);
+}
+
 .field {
-  margin-bottom: 14px;
+  margin-bottom: var(--wx-s4);
 }
 .field label {
   display: block;
-  font-size: 11px;
-  letter-spacing: 1px;
+  font-family: var(--wx-font-display);
+  font-size: 10px;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
   color: var(--wx-text-dim);
   margin-bottom: 6px;
@@ -356,12 +494,26 @@ function instanceLabel(i: ItemInstanceDto): string {
   margin-top: 6px;
 }
 .est {
-  font-size: 12px;
-  margin: 6px 0 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  letter-spacing: 1px;
+  margin: 2px 0 var(--wx-s4);
+  padding: 8px 10px;
+  background: var(--wx-inset);
+  border: 1px dashed var(--wx-border);
+  border-radius: var(--wx-r-sm);
+}
+.est-val {
+  color: var(--wx-amber-bright);
+  font-weight: 700;
+  font-size: 13px;
 }
 .submit {
   width: 100%;
 }
+
 @media (max-width: 860px) {
   .layout {
     grid-template-columns: 1fr;

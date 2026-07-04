@@ -58,7 +58,10 @@ function open(templateId: number) {
         </div>
         <div class="qty mono">×{{ s.quantity }}</div>
       </button>
-      <div v-if="!loading && stacks.length === 0" class="wx-empty">No stacked items.</div>
+      <div v-if="!loading && stacks.length === 0" class="wx-empty">
+        <img class="pixel" src="/sprites/food_can.svg" alt="" />
+        Stash is empty. Go loot something.
+      </div>
     </div>
 
     <h3 class="wx-section-title" style="margin-top: 28px">Unique Gear</h3>
@@ -85,7 +88,10 @@ function open(templateId: number) {
           </el-progress>
         </div>
       </div>
-      <div v-if="!loading && instances.length === 0" class="wx-empty">No unique gear.</div>
+      <div v-if="!loading && instances.length === 0" class="wx-empty">
+        <img class="pixel" src="/sprites/gun_rifle.svg" alt="" />
+        No unique gear yet. The good stuff is still out there.
+      </div>
     </div>
   </div>
 </template>
@@ -96,21 +102,30 @@ function open(templateId: number) {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 10px;
 }
+.grid .wx-empty,
+.instances .wx-empty {
+  grid-column: 1 / -1;
+}
 .stack {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: var(--wx-panel);
+  background: linear-gradient(180deg, var(--wx-panel-2), var(--wx-panel) 55%);
   border: 1px solid var(--wx-border);
-  border-radius: 8px;
+  border-radius: var(--wx-r);
   padding: 10px 12px;
   cursor: pointer;
   color: inherit;
   font: inherit;
   text-align: left;
+  box-shadow: var(--wx-shadow);
+  transition:
+    transform 0.14s ease,
+    border-color 0.14s ease;
 }
 .stack:hover {
   border-color: var(--wx-border-strong);
+  transform: translateY(-2px);
 }
 .stack-body {
   flex: 1;
@@ -127,7 +142,7 @@ function open(templateId: number) {
 .qty {
   font-size: 16px;
   font-weight: 800;
-  color: var(--wx-accent);
+  color: var(--wx-amber-bright);
 }
 .instances {
   display: grid;
@@ -138,14 +153,19 @@ function open(templateId: number) {
   display: flex;
   align-items: center;
   gap: 12px;
-  background: var(--wx-panel);
+  background: linear-gradient(180deg, var(--wx-panel-2), var(--wx-panel) 55%);
   border: 1px solid var(--wx-border);
-  border-radius: 8px;
+  border-radius: var(--wx-r);
   padding: 12px;
   cursor: pointer;
+  box-shadow: var(--wx-shadow);
+  transition:
+    transform 0.14s ease,
+    border-color 0.14s ease;
 }
 .instance:hover {
   border-color: var(--wx-border-strong);
+  transform: translateY(-2px);
 }
 .instance-body {
   flex: 1;
