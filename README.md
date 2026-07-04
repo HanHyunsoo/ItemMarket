@@ -168,7 +168,13 @@ tools/gen-sprites.mjs       # ASCII 픽셀맵 → SVG 스프라이트 생성기 
 ## 확장 로드맵
 
 - **그리드 인벤토리**: N×M 스태시에 w×h 아이템 배치 — 서버 권위 배치 검증(경계·충돌)
-- **실시간 호가 푸시**: SignalR + Redis 백플레인 (폴링 → 푸시 전환 시점에 도입)
+- **다중 인스턴스 실시간(Redis 백플레인) ✅(구현·config-gated)**: `Redis:ConnectionString` 을 주면
+  SignalR 에 `AddStackExchangeRedis` 백플레인을 붙인다(비어있으면 기존 인메모리 단일 인스턴스 그대로).
+  2 인스턴스(Orleans adonet 클러스터링 + Redis 백플레인, `scripts/run-cluster.sh`)로 **크로스-인스턴스
+  라이브 푸시를 실증**: 인스턴스 A(:5091)에 붙은 SignalR 구독자가, 인스턴스 B(:5092)의 REST 주문 체결로
+  발생한 `OrderBookUpdated`+`TradeExecuted` 를 수신(B→A 중계). 백플레인을 끄면 동일 시나리오에서 REST 는
+  여전히 체결되지만(fills=1) A 는 두 이벤트를 모두 미수신 → 백플레인이 결정적 요소임을 확인.
+  설계·계약: [`docs/realtime-contract.md`](docs/realtime-contract.md)
 - **운영 고도화**: rate limiting, 이상 거래 탐지(원장 기반 RMT 휴리스틱), 시세 차트
 - **핫 grain 가격대 샤딩 ✅(구현·opt-in)**: 인기 종목 호가창을 `(templateId, priceBand)`로 분할하는
   코디네이터+밴드 grain을 구현(`Market:PriceBandSize`, 기본 0=비활성). 핫 시나리오에서 단일 grain

@@ -278,3 +278,35 @@ done
 # 4) 정리: API 종료 + 부하 DB 삭제 (데모 item_market 은 그대로)
 docker exec item-market-db psql -U market -d postgres -c "DROP DATABASE item_market_load;"
 ```
+
+---
+
+## 부록: 다중 인스턴스 실시간 (Redis SignalR 백플레인)
+
+성능이 아닌 **아키텍처 실증**이지만 같은 격리 방법론(전용 DB/포트/ClusterId)을 쓰므로 함께 기록한다.
+
+**주장**: 2 API 인스턴스 + Orleans adonet 클러스터링에서 특정 `OrderBookGrain` 은 단 하나의 실로에
+살고 어느 인스턴스로 REST 가 들어와도 그 grain 으로 라우팅된다. 하지만 SignalR 클라이언트는 두
+인스턴스 중 한쪽에만 붙는다. REST 를 처리한 인스턴스가 `IHubContext` 로 발행해도 구독자가 다른
+인스턴스에 있으면 못 받는다 — **Redis 백플레인**이 인스턴스 간 중계를 해줘야 크로스-인스턴스 푸시가
+성립한다.
+
+**토폴로지**: `scripts/run-cluster.sh` — 인스턴스 A(`:5091`), B(`:5092`), 전용 DB
+`item_market_cluster`(`db/ddl.sql`+`orleans-clustering.sql`), 전용 ClusterId `item-market-cluster`,
+Redis `localhost:6379`. 라이브 데모(`:5080`/`item_market`)와 완전 분리. 멤버십 테이블에 **Active 실로
+2개**(Status=3) 확인.
+
+**절차**: 스로어웨이 `Microsoft.AspNetCore.SignalR.Client` 콘솔로 (1) A 의 hub 에 연결 +
+`SubscribeTemplate(1)`, (2) B 의 REST 로 매칭 sell(Alpha)+buy(Bravo) 등록, (3) A 의 클라이언트 수신 관찰.
+
+**실측 결과**:
+
+| 구성 | B REST 체결(fills) | A 수신 `OrderBookUpdated` | A 수신 `TradeExecuted` | 결론 |
+|---|---:|:---:|:---:|---|
+| **Redis 백플레인 ON**  | 1 | ✅ YES | ✅ YES | 크로스-인스턴스 푸시 성립(B→A 중계) |
+| **Redis 백플레인 OFF** | 1 | ❌ NO  | ❌ NO  | Orleans 라우팅으로 체결은 되나 A 는 미수신 |
+
+두 케이스 모두 B 의 REST 는 정상 체결(fills=1) → Orleans 크로스-인스턴스 라우팅은 백플레인과 무관하게
+동작한다는 것과, **실시간 푸시의 크로스-인스턴스 전달만이 Redis 백플레인의 산물**임을 분리해 증명한다.
+스위치는 config-gated(`Redis:ConnectionString` 비면 인메모리 단일 인스턴스)라 기존 60개 테스트/데모/
+성능 경로는 불변이다.

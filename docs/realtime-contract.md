@@ -33,8 +33,24 @@
   - 주문/취소 후 `GetSnapshot()` 결과를 `OrderBookUpdated`로 그룹에 push.
   - `PlaceOrderResult.Fills`의 각 체결을 `TradeExecuted`로 push + 매수/매도자에게 `WalletChanged`.
 - **단일 인스턴스(co-host)** 에서는 grain과 허브가 같은 프로세스라 `IHubContext` 직접 push로 충분.
-- **다중 인스턴스**로 확장 시: 클라이언트가 붙은 API 인스턴스와 grain 소유 실로가 다를 수 있으므로
-  **Redis 백플레인**(`AddStackExchangeRedis`)이 필요하다. (지금은 미도입, 확장 로드맵.)
+- **다중 인스턴스**로 확장 시: SignalR 클라이언트는 두 인스턴스 중 "한쪽"에만 붙는다. REST 를
+  처리한 인스턴스가 `IHubContext` 로 발행해도 구독자가 "다른" 인스턴스에 있으면 못 받는다.
+  이때 **Redis 백플레인**이 인스턴스 간 브로드캐스트를 중계해 크로스-인스턴스 라이브 푸시를 성립시킨다.
+
+## 다중 인스턴스 실시간 (Redis 백플레인) — ✅ 구현됨 (config-gated)
+
+- `Redis:ConnectionString`(env `Redis__ConnectionString`)이 설정되면 `AddSignalR()` 에
+  `AddStackExchangeRedis(conn)` 백플레인을 붙인다(`Program.cs`). **비어있으면(기본) 기존과 완전히
+  동일한 인메모리 단일 인스턴스** 동작이라 기존 테스트/데모/성능 경로는 불변(비파괴적 스위치).
+- 패키지: `Microsoft.AspNetCore.SignalR.StackExchangeRedis`. 인프라: `docker-compose.yml` 의
+  `redis`(redis:7) 선택 서비스. 데모: `scripts/run-cluster.sh` 가 **2 인스턴스**(Orleans adonet
+  클러스터링 + 전용 ClusterId `item-market-cluster` + 전용 DB `item_market_cluster` + Redis 백플레인)를
+  띄운다(라이브 데모 `:5080`/`item_market` 와 완전 분리).
+- **크로스-인스턴스 실증(실측)**: 클라이언트를 인스턴스 A(`:5091`)의 hub 에 붙여
+  `SubscribeTemplate(1)` 한 뒤, 매칭되는 sell+buy 를 인스턴스 B(`:5092`)의 REST 로 등록.
+  - **백플레인 ON**: A 의 클라이언트가 `OrderBookUpdated` + `TradeExecuted` **수신** → B→A 중계 성립.
+  - **백플레인 OFF**: 동일 시나리오에서 B 의 REST 는 여전히 체결(fills=1, Orleans 라우팅은 무관)되지만
+    A 의 클라이언트는 두 이벤트를 **모두 미수신** → 백플레인이 크로스-인스턴스 푸시의 결정적 요소임을 증명.
 
 ## 프론트 동작
 
