@@ -138,7 +138,10 @@ function clearDrag(): void {
 // authoritative: on rejection we revert to the last known-good server state.
 async function move(p: StashPlacementDto, x: number, y: number): Promise<void> {
   if (!stash.value) return
-  const snapshot = structuredClone(stash.value)
+  // 낙관적 업데이트는 아래에서 stash.value를 '새 객체'로 교체하므로(스프레드),
+  // 기존 객체는 그대로 남는다 → 복제 없이 이전 참조만 잡아두면 롤백에 충분하다.
+  // (Vue 반응형 프록시는 structuredClone으로 복제 불가 → DataCloneError 발생했었음)
+  const snapshot = stash.value
   const self = keyOf(p)
   stash.value = {
     ...stash.value,
