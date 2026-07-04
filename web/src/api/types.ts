@@ -8,12 +8,7 @@ export type OrderStatus = 'Open' | 'PartiallyFilled' | 'Filled' | 'Cancelled'
 export type ItemCategory = 'Food' | 'Medical' | 'Melee' | 'Gun' | 'Ammo'
 export type ItemRarity = 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Legendary'
 export type WalletLedgerReason =
-  | 'OrderEscrow'
-  | 'OrderRefund'
-  | 'TradePayment'
-  | 'TradeProceeds'
-  | 'Fee'
-  | 'AdminAdjust'
+  'OrderEscrow' | 'OrderRefund' | 'TradePayment' | 'TradeProceeds' | 'Fee' | 'AdminAdjust'
 
 export type ErrorCode =
   | 'Unknown'
@@ -30,6 +25,7 @@ export type ErrorCode =
   | 'OrderNotOwned'
   | 'OrderAlreadyClosed'
   | 'StackableMismatch'
+  | 'PlacementInvalid'
 
 // ---- Common envelope ----
 export interface ApiError {
@@ -95,6 +91,37 @@ export interface InventoryDto {
   playerId: string
   stacks: InventoryStackDto[]
   instances: ItemInstanceDto[]
+}
+
+// ---- Stash (spatial grid inventory) ----
+// A placement occupies a w×h footprint at top-left cell (x, y).
+export type StashItemKind = 'Stack' | 'Instance'
+
+export interface StashPlacementDto {
+  kind: StashItemKind
+  templateId: number
+  instanceId?: string | null
+  x: number
+  y: number
+  w: number
+  h: number
+  quantity: number
+}
+
+export interface StashDto {
+  playerId: string
+  gridW: number
+  gridH: number
+  placements: StashPlacementDto[]
+  unplaced: StashPlacementDto[]
+}
+
+export interface MoveStashItemRequest {
+  kind: StashItemKind
+  templateId?: number | null
+  instanceId?: string | null
+  x: number
+  y: number
 }
 
 // ---- Wallet ----

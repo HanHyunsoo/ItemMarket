@@ -21,6 +21,7 @@ const navItems = computed(() => {
   const base = [
     { name: 'market', label: 'Market' },
     { name: 'inventory', label: 'Stash' },
+    { name: 'stash', label: 'Grid' },
     { name: 'wallet', label: 'Wallet' },
     { name: 'orders', label: 'Orders' },
   ]
@@ -81,7 +82,7 @@ function go(name: string) {
         </div>
       </div>
 
-      <nav class="nav" v-if="isAuthenticated">
+      <nav v-if="isAuthenticated" class="nav">
         <button
           v-for="item in navItems"
           :key="item.name"
@@ -95,7 +96,11 @@ function go(name: string) {
       <div v-else class="nav" />
 
       <div class="player">
-        <div v-if="isAuthenticated && balance !== null" class="caps-chip mono" title="Bottle cap balance">
+        <div
+          v-if="isAuthenticated && balance !== null"
+          class="caps-chip mono"
+          title="Bottle cap balance"
+        >
           <img class="pixel" src="/sprites/cap_coin.svg" alt="caps" />
           <span>{{ caps(balance) }}</span>
         </div>
@@ -110,12 +115,7 @@ function go(name: string) {
             class="dogtag-select"
             @change="onSelect"
           >
-            <el-option
-              v-for="p in SEED_PLAYERS"
-              :key="p.id"
-              :label="p.displayName"
-              :value="p.id"
-            />
+            <el-option v-for="p in SEED_PLAYERS" :key="p.id" :label="p.displayName" :value="p.id" />
           </el-select>
           <span v-if="isAdmin" class="dogtag-role">OP</span>
         </div>
@@ -131,7 +131,9 @@ function go(name: string) {
   z-index: 50;
   background: linear-gradient(180deg, rgba(34, 29, 21, 0.96), rgba(20, 17, 11, 0.92));
   border-bottom: 1px solid var(--wx-border-strong);
-  box-shadow: 0 1px 0 rgba(255, 240, 200, 0.04) inset, 0 4px 18px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    0 1px 0 rgba(255, 240, 200, 0.04) inset,
+    0 4px 18px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(6px);
 }
 /* rust hairline under the bar */
@@ -139,7 +141,14 @@ function go(name: string) {
   content: '';
   display: block;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--wx-rust) 18%, var(--wx-amber) 50%, var(--wx-rust) 82%, transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--wx-rust) 18%,
+    var(--wx-amber) 50%,
+    var(--wx-rust) 82%,
+    transparent
+  );
   opacity: 0.55;
 }
 .wx-header-inner {
@@ -261,8 +270,7 @@ function go(name: string) {
   border: 1px solid rgba(224, 163, 60, 0.35);
   border-radius: 999px;
   background:
-    radial-gradient(circle at 12% 50%, rgba(224, 163, 60, 0.16), transparent 60%),
-    var(--wx-inset);
+    radial-gradient(circle at 12% 50%, rgba(224, 163, 60, 0.16), transparent 60%), var(--wx-inset);
   color: var(--wx-amber-bright);
   font-size: 13px;
   font-weight: 700;

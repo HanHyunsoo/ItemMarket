@@ -11,7 +11,12 @@ const catalog = useCatalogStore()
 const tab = ref('grant')
 
 // ---- Forms ----
-const grantStack = reactive({ playerId: '', templateId: null as number | null, quantity: 1, busy: false })
+const grantStack = reactive({
+  playerId: '',
+  templateId: null as number | null,
+  quantity: 1,
+  busy: false,
+})
 const grantInst = reactive({
   playerId: '',
   templateId: null as number | null,
@@ -167,12 +172,22 @@ function playerName(id: string): string {
             <div class="field">
               <label>Player</label>
               <el-select v-model="grantStack.playerId" placeholder="Player" style="width: 100%">
-                <el-option v-for="p in SEED_PLAYERS" :key="p.id" :label="p.displayName" :value="p.id" />
+                <el-option
+                  v-for="p in SEED_PLAYERS"
+                  :key="p.id"
+                  :label="p.displayName"
+                  :value="p.id"
+                />
               </el-select>
             </div>
             <div class="field">
               <label>Item template</label>
-              <el-select v-model="grantStack.templateId" filterable placeholder="Item" style="width: 100%">
+              <el-select
+                v-model="grantStack.templateId"
+                filterable
+                placeholder="Item"
+                style="width: 100%"
+              >
                 <el-option
                   v-for="it in catalog.items.filter((i) => i.stackable)"
                   :key="it.id"
@@ -183,9 +198,16 @@ function playerName(id: string): string {
             </div>
             <div class="field">
               <label>Quantity</label>
-              <el-input-number v-model="grantStack.quantity" :min="1" style="width: 100%" controls-position="right" />
+              <el-input-number
+                v-model="grantStack.quantity"
+                :min="1"
+                style="width: 100%"
+                controls-position="right"
+              />
             </div>
-            <el-button type="primary" :loading="grantStack.busy" @click="doGrantStack">Grant Stack</el-button>
+            <el-button type="primary" :loading="grantStack.busy" @click="doGrantStack"
+              >Grant Stack</el-button
+            >
           </section>
 
           <section class="wx-panel">
@@ -193,12 +215,22 @@ function playerName(id: string): string {
             <div class="field">
               <label>Player</label>
               <el-select v-model="grantInst.playerId" placeholder="Player" style="width: 100%">
-                <el-option v-for="p in SEED_PLAYERS" :key="p.id" :label="p.displayName" :value="p.id" />
+                <el-option
+                  v-for="p in SEED_PLAYERS"
+                  :key="p.id"
+                  :label="p.displayName"
+                  :value="p.id"
+                />
               </el-select>
             </div>
             <div class="field">
               <label>Item template (unique)</label>
-              <el-select v-model="grantInst.templateId" filterable placeholder="Item" style="width: 100%">
+              <el-select
+                v-model="grantInst.templateId"
+                filterable
+                placeholder="Item"
+                style="width: 100%"
+              >
                 <el-option
                   v-for="it in catalog.items.filter((i) => !i.stackable)"
                   :key="it.id"
@@ -209,13 +241,20 @@ function playerName(id: string): string {
             </div>
             <div class="field">
               <label>Durability (optional)</label>
-              <el-input-number v-model="grantInst.durability" :min="0" style="width: 100%" controls-position="right" />
+              <el-input-number
+                v-model="grantInst.durability"
+                :min="0"
+                style="width: 100%"
+                controls-position="right"
+              />
             </div>
             <div class="field">
               <label>Attachments (comma-separated)</label>
               <el-input v-model="grantInst.attachments" placeholder="scope, suppressor" />
             </div>
-            <el-button type="primary" :loading="grantInst.busy" @click="doGrantInstance">Grant Instance</el-button>
+            <el-button type="primary" :loading="grantInst.busy" @click="doGrantInstance"
+              >Grant Instance</el-button
+            >
           </section>
         </div>
       </el-tab-pane>
@@ -228,18 +267,30 @@ function playerName(id: string): string {
             <div class="field">
               <label>Player</label>
               <el-select v-model="adjust.playerId" placeholder="Player" style="width: 100%">
-                <el-option v-for="p in SEED_PLAYERS" :key="p.id" :label="p.displayName" :value="p.id" />
+                <el-option
+                  v-for="p in SEED_PLAYERS"
+                  :key="p.id"
+                  :label="p.displayName"
+                  :value="p.id"
+                />
               </el-select>
             </div>
             <div class="field">
               <label>Delta (+/− caps)</label>
-              <el-input-number v-model="adjust.delta" :step="100" style="width: 100%" controls-position="right" />
+              <el-input-number
+                v-model="adjust.delta"
+                :step="100"
+                style="width: 100%"
+                controls-position="right"
+              />
             </div>
             <div class="field">
               <label>Reason</label>
               <el-input v-model="adjust.reason" placeholder="e.g. event reward" />
             </div>
-            <el-button type="primary" :loading="adjust.busy" @click="doAdjust">Apply Adjustment</el-button>
+            <el-button type="primary" :loading="adjust.busy" @click="doAdjust"
+              >Apply Adjustment</el-button
+            >
           </section>
 
           <section class="wx-panel">
@@ -252,7 +303,9 @@ function playerName(id: string): string {
               <label>Reason</label>
               <el-input v-model="forceCancel.reason" placeholder="e.g. suspected manipulation" />
             </div>
-            <el-button type="danger" :loading="forceCancel.busy" @click="doForceCancel">Force Cancel</el-button>
+            <el-button type="danger" :loading="forceCancel.busy" @click="doForceCancel"
+              >Force Cancel</el-button
+            >
           </section>
         </div>
       </el-tab-pane>
@@ -261,10 +314,26 @@ function playerName(id: string): string {
       <el-tab-pane label="All Orders" name="orders">
         <div class="wx-panel">
           <div class="filters">
-            <el-select v-model="ordersFilter.templateId" filterable clearable placeholder="Item" style="width: 220px">
-              <el-option v-for="it in catalog.items" :key="it.id" :label="`${it.name} (#${it.id})`" :value="it.id" />
+            <el-select
+              v-model="ordersFilter.templateId"
+              filterable
+              clearable
+              placeholder="Item"
+              style="width: 220px"
+            >
+              <el-option
+                v-for="it in catalog.items"
+                :key="it.id"
+                :label="`${it.name} (#${it.id})`"
+                :value="it.id"
+              />
             </el-select>
-            <el-select v-model="ordersFilter.status" clearable placeholder="Status" style="width: 160px">
+            <el-select
+              v-model="ordersFilter.status"
+              clearable
+              placeholder="Status"
+              style="width: 160px"
+            >
               <el-option v-for="s in STATUSES" :key="s" :label="s" :value="s" />
             </el-select>
             <el-button @click="((ordersPage = 1), loadOrders())">Apply</el-button>
@@ -282,18 +351,26 @@ function playerName(id: string): string {
               </template>
             </el-table-column>
             <el-table-column label="Price" align="right" width="100">
-              <template #default="{ row }"><span class="mono">{{ caps(row.unitPrice) }}</span></template>
+              <template #default="{ row }"
+                ><span class="mono">{{ caps(row.unitPrice) }}</span></template
+              >
             </el-table-column>
             <el-table-column label="Rem/Qty" align="right" width="100">
-              <template #default="{ row }"><span class="mono">{{ row.remainingQuantity }}/{{ row.quantity }}</span></template>
+              <template #default="{ row }"
+                ><span class="mono">{{ row.remainingQuantity }}/{{ row.quantity }}</span></template
+              >
             </el-table-column>
             <el-table-column label="Status" width="130">
               <template #default="{ row }">
-                <el-tag :type="orderStatusType(row.status)" effect="dark" size="small">{{ row.status }}</el-tag>
+                <el-tag :type="orderStatusType(row.status)" effect="dark" size="small">{{
+                  row.status
+                }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="Order ID" width="110">
-              <template #default="{ row }"><span class="mono wx-muted">{{ shortId(row.id) }}</span></template>
+              <template #default="{ row }"
+                ><span class="mono wx-muted">{{ shortId(row.id) }}</span></template
+              >
             </el-table-column>
           </el-table>
           <div class="pager">
@@ -302,7 +379,7 @@ function playerName(id: string): string {
               :total="ordersTotal"
               :page-size="PAGE_SIZE"
               :current-page="ordersPage"
-              @current-change="((p: number) => ((ordersPage = p), loadOrders()))"
+              @current-change="(p: number) => ((ordersPage = p), loadOrders())"
             />
           </div>
         </div>
@@ -313,7 +390,9 @@ function playerName(id: string): string {
         <div class="wx-panel">
           <el-table v-loading="tradesLoading" :data="trades" size="small" empty-text="No trades">
             <el-table-column label="Time" width="130">
-              <template #default="{ row }"><span class="wx-muted">{{ dateTime(row.executedAt) }}</span></template>
+              <template #default="{ row }"
+                ><span class="wx-muted">{{ dateTime(row.executedAt) }}</span></template
+              >
             </el-table-column>
             <el-table-column label="Item" min-width="150">
               <template #default="{ row }">{{ name(row.itemTemplateId) }}</template>
@@ -325,13 +404,19 @@ function playerName(id: string): string {
               <template #default="{ row }">{{ playerName(row.sellerId) }}</template>
             </el-table-column>
             <el-table-column label="Price" align="right" width="100">
-              <template #default="{ row }"><span class="mono">{{ caps(row.unitPrice) }}</span></template>
+              <template #default="{ row }"
+                ><span class="mono">{{ caps(row.unitPrice) }}</span></template
+              >
             </el-table-column>
             <el-table-column label="Qty" align="right" width="70">
-              <template #default="{ row }"><span class="mono">{{ row.quantity }}</span></template>
+              <template #default="{ row }"
+                ><span class="mono">{{ row.quantity }}</span></template
+              >
             </el-table-column>
             <el-table-column label="Fee" align="right" width="90">
-              <template #default="{ row }"><span class="mono wx-muted">{{ caps(row.feeAmount) }}</span></template>
+              <template #default="{ row }"
+                ><span class="mono wx-muted">{{ caps(row.feeAmount) }}</span></template
+              >
             </el-table-column>
           </el-table>
           <div class="pager">
@@ -340,7 +425,7 @@ function playerName(id: string): string {
               :total="tradesTotal"
               :page-size="PAGE_SIZE"
               :current-page="tradesPage"
-              @current-change="((p: number) => ((tradesPage = p), loadTrades()))"
+              @current-change="(p: number) => ((tradesPage = p), loadTrades())"
             />
           </div>
         </div>

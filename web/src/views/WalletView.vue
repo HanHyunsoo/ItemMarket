@@ -62,21 +62,29 @@ function onPage(p: number) {
     <div class="wx-panel">
       <el-table v-loading="loading" :data="entries" size="small" empty-text="No ledger activity">
         <el-table-column label="Time" width="140">
-          <template #default="{ row }"><span class="wx-muted">{{ dateTime(row.createdAt) }}</span></template>
+          <template #default="{ row }"
+            ><span class="wx-muted">{{ dateTime(row.createdAt) }}</span></template
+          >
         </el-table-column>
         <el-table-column label="Reason">
           <template #default="{ row }">{{ ledgerReasonLabel(row.reason) }}</template>
         </el-table-column>
         <el-table-column label="Ref" width="110">
-          <template #default="{ row }"><span class="mono wx-muted">{{ shortId(row.refId) }}</span></template>
+          <template #default="{ row }"
+            ><span class="mono wx-muted">{{ shortId(row.refId) }}</span></template
+          >
         </el-table-column>
         <el-table-column label="Delta" align="right" width="130">
           <template #default="{ row }">
-            <span class="mono" :class="row.delta < 0 ? 'wx-sell' : 'wx-buy'">{{ signedCaps(row.delta) }}</span>
+            <span class="mono" :class="row.delta < 0 ? 'wx-sell' : 'wx-buy'">{{
+              signedCaps(row.delta)
+            }}</span>
           </template>
         </el-table-column>
         <el-table-column label="Balance" align="right" width="130">
-          <template #default="{ row }"><span class="mono">{{ caps(row.balanceAfter) }}</span></template>
+          <template #default="{ row }"
+            ><span class="mono">{{ caps(row.balanceAfter) }}</span></template
+          >
         </el-table-column>
       </el-table>
       <div class="pager">
@@ -107,8 +115,7 @@ function onPage(p: number) {
   border-radius: 50%;
   border: 1px solid rgba(224, 163, 60, 0.35);
   background:
-    radial-gradient(circle at 50% 40%, rgba(224, 163, 60, 0.22), transparent 72%),
-    var(--wx-inset);
+    radial-gradient(circle at 50% 40%, rgba(224, 163, 60, 0.22), transparent 72%), var(--wx-inset);
   flex: none;
 }
 .cap-icon {
