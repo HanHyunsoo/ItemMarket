@@ -32,7 +32,10 @@ public sealed class JwtTokenIssuer(
         var claims = new List<Claim>
         {
             new("sub", playerId.ToString()),
-            new("name", displayName)
+            new("name", displayName),
+            // jti: 토큰 고유 식별자. 같은 초에 재발급돼도 토큰이 바이트 동일해지지 않게 하고,
+            // 향후 토큰 단위 폐기(블랙리스트)의 키로 쓸 수 있다.
+            new("jti", Guid.NewGuid().ToString())
         };
         if (isAdmin) claims.Add(new Claim("role", "admin"));
 
