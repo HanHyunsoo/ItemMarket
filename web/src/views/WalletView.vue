@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { walletApi } from '@/api/endpoints'
 import { caps, dateTime, ledgerReasonLabel, shortId, signedCaps } from '@/utils/format'
 import { toastError } from '@/utils/toast'
+import { onWalletChanged } from '@/realtime/marketHub'
 import type { WalletDto, WalletLedgerEntryDto } from '@/api/types'
 
 const wallet = ref<WalletDto | null>(null)
@@ -36,6 +37,13 @@ async function loadLedger() {
 onMounted(async () => {
   await Promise.all([loadWallet(), loadLedger()])
 })
+
+// Live: refresh balance + ledger when this player's wallet changes.
+const offWalletChanged = onWalletChanged(() => {
+  loadWallet()
+  loadLedger()
+})
+onUnmounted(offWalletChanged)
 
 function onPage(p: number) {
   page.value = p
