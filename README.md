@@ -14,6 +14,45 @@
 
 ---
 
+## 스크린샷
+
+> 시드된 라이브 마켓(주문·체결) 화면. Vue 3 + Element Plus 다크 테마.
+> 캡처는 Playwright로 재현 가능 — [`tools/screenshots`](tools/screenshots).
+
+### 마켓 카탈로그 — 아이템 102종 · 픽셀 스프라이트 · 등급
+아이템 카드 그리드. 카테고리 필터(FOOD/MEDICAL/MELEE/GUN/AMMO)와 등급 배지, 최저 매도가 표시.
+
+![Market catalog](docs/screenshots/market.png)
+
+### 아이템 상세 — 호가창 · 체결 이력 · 주문 폼
+7.62mm 탄약의 매수/매도 **호가 래더**(가격-수량-주문수), 실시간 스프레드, 우측 매수/매도 주문 폼,
+하단 **최근 체결**(가격·수량·수수료).
+
+![Item detail order book](docs/screenshots/item-detail.png)
+
+### 그리드 스태시 — 타르코프식 footprint 인벤토리
+10×12 스태시. 아이템 footprint(권총 2×1, AK-47 등 총기 4×2)와 스택 수량, 자리가 없어 대기 중인
+오버플로 트레이. 드래그앤드롭 배치는 서버가 검증.
+
+![Grid stash](docs/screenshots/grid-stash.png)
+
+### 지갑 — 병뚜껑 잔액 + append-only 원장
+현재 잔액과 원장 타임라인(판매 대금 / 수수료 소각 / 에스크로 락 등, delta·running balance).
+
+![Wallet ledger](docs/screenshots/wallet.png)
+
+### 운영(GM) 콘솔 — admin 롤 전용
+아이템 지급(스택/유니크 인스턴스), 지갑 조정, 주문 강제 취소, 전체 주문·체결 조회 탭.
+
+![Admin console](docs/screenshots/admin.png)
+
+### API 문서 — Swagger / OpenAPI
+`ApiResponse<T>` 공통 래핑 규약과 JWT Bearer 인증, 엔드포인트 전체.
+
+![Swagger UI](docs/screenshots/swagger.png)
+
+---
+
 ## 기능 한눈에
 
 | 영역 | 내용 |

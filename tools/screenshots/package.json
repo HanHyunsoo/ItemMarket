@@ -1,0 +1,13 @@
+{
+  "name": "wx-screenshots",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Playwright capture script for Wasteland Exchange README screenshots.",
+  "type": "module",
+  "scripts": {
+    "shots": "node capture.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0"
+  }
+}
