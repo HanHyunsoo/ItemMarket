@@ -15,8 +15,11 @@ public static class OrderEndpoints
     {
         var api = app.MapGroup("/api").RequireAuthorization();
 
-        api.MapPost("/orders", (PlaceOrderRequest req, ClaimsPrincipal u, IGrainFactory gf, IMarketNotifier notifier) =>
-            Exec(async () =>
+        api.MapPost("/orders", (PlaceOrderRequest req, ClaimsPrincipal u, IGrainFactory gf,
+            IMarketNotifier notifier, MarketRepository repo, HttpContext ctx) =>
+        {
+            // 실제 주문 등록 + 매칭 + 실시간 발행. 멱등/일반 경로가 공유한다.
+            async Task<PlaceOrderResult> Place()
             {
                 var pid = CurrentPlayer(u);
                 var grain = gf.GetGrain<IOrderBookGrain>(req.ItemTemplateId);
@@ -24,7 +27,14 @@ public static class OrderEndpoints
                 // 발행(best-effort): 갱신 호가창 + 체결별 이벤트 + 행위자 지갑 변동.
                 await notifier.PublishOrderActivityAsync(await grain.GetSnapshot(), pid, result.Fills);
                 return result;
-            }));
+            }
+
+            // Idempotency-Key 헤더가 있으면 재시도/중복 제출에도 주문이 한 번만 등록되게 한다.
+            var key = ctx.Request.Headers["Idempotency-Key"].ToString();
+            return string.IsNullOrWhiteSpace(key)
+                ? Exec(Place)
+                : ExecIdempotent(repo, u, key.Trim(), Place);
+        }).RequireRateLimiting(RateLimiting.OrdersPolicy);
 
         api.MapGet("/orders", (ClaimsPrincipal u, MarketRepository repo) =>
             Exec(() => repo.GetOrdersByPlayerAsync(CurrentPlayer(u))));

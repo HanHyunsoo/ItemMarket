@@ -22,6 +22,9 @@ builder.AddMarketOrleans(connString);
 // 인증(JWT Bearer) + 인가(admin 롤) + 토큰 발급기 — Infrastructure/AuthSetup.cs
 builder.AddMarketAuth();
 
+// 레이트 리미팅(주문 등록, 플레이어별) — Infrastructure/RateLimiting.cs
+builder.AddMarketRateLimiting();
+
 // DI: 리포지토리(싱글턴, 소스오브트루스 = Postgres)
 builder.Services.AddSingleton(new MarketRepository(connString));
 
@@ -53,6 +56,8 @@ ApiResults.Logger = app.Logger; // Exec 헬퍼의 예상외 예외 로깅용
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
+// 레이트 리미터는 인증 뒤에 둬서 파티션 키가 sub 클레임(플레이어)을 볼 수 있게 한다.
+app.UseRateLimiter();
 
 // 엔드포인트 — docs/api-contract.md 섹션과 1:1 (Endpoints/*.cs)
 app.MapAuthEndpoints();

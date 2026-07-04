@@ -11,6 +11,8 @@
 - 오류: `Error.Code`(열거형, `ErrorCode`)로 분기, `Error.Message`로 표시.
   인증 실패는 `Unauthorized`(401), 권한 부족은 `Forbidden`(403).
 - 실시간: 호가창/체결/지갑 변경은 SignalR 허브 `/hubs/market`로 서버 푸시한다 — 계약은 [docs/realtime-contract.md](./realtime-contract.md) 참고.
+- 멱등성: `POST /api/orders`는 선택 헤더 `Idempotency-Key`를 지원한다(아래 참고).
+- 레이트 리밋: `POST /api/orders`는 플레이어별 한도 초과 시 `429`(`ApiResponse` 실패 봉투, `RateLimited`)를 반환한다.
 
 ## 인증 엔드포인트
 
@@ -80,8 +82,31 @@
   플레이어당 grain 단일 활성화로 동시 이동이 직렬화된다(락 불필요).
 - 대상 지정: 스택 이동은 `Kind=Stack`+`TemplateId`, 유니크 이동은 `Kind=Instance`+`InstanceId`.
 
+## 멱등성 (`POST /api/orders`)
+
+재시도/중복 제출(네트워크 재전송, 더블클릭)로 주문이 두 번 등록되는 것을 막는다.
+
+- 요청에 `Idempotency-Key: <임의 문자열>` 헤더를 붙인다(선택). 헤더가 없으면 기존 동작 그대로.
+- 키는 **플레이어별**로 유일해야 한다. 슬롯은 `(player_id, key)`로 관리한다.
+- 처리 흐름:
+  1. 헤더가 있으면 `(player_id, key)` 슬롯을 원자적으로 선점(`INSERT ... ON CONFLICT DO NOTHING`).
+  2. 선점 성공(원본): 주문을 등록하고 직렬화된 `ApiResponse<PlaceOrderResult>` JSON을 저장 후 반환.
+  3. 선점 실패(중복): 저장된 응답을 **그대로** 반환한다(주문 재등록 없음).
+  4. 원본이 아직 처리 중(응답 미저장)이면 `409` + `ApiResponse`(`IdempotencyInProgress`).
+  5. 원본이 실패하면 슬롯을 비워 같은 키로 재시도 가능.
+
+## 레이트 리밋 (`POST /api/orders`)
+
+- **플레이어별** 고정창(fixed-window) 리미터. 파티션 키는 토큰의 `sub`(플레이어),
+  익명은 원격 IP로 폴백.
+- 한도 초과 시 `429 Too Many Requests` + 표준 `ApiResponse` 실패 봉투(`RateLimited`),
+  `Retry-After` 헤더 포함.
+- 설정(`appsettings` → `RateLimiting:Orders`): `PermitLimit`(기본 1000),
+  `WindowSeconds`(기본 10), `QueueLimit`(기본 0). 데모/테스트가 throttle되지 않도록 넉넉한 기본값.
+
 ## 오류 코드 (`ErrorCode`)
 
 `ValidationError` · `PlayerNotFound` · `TemplateNotFound` · `InstanceNotFound` ·
 `InstanceNotOwned` · `InsufficientFunds` · `InsufficientQuantity` · `OrderNotFound` ·
-`OrderNotOwned` · `OrderAlreadyClosed` · `StackableMismatch` · `PlacementInvalid`
+`OrderNotOwned` · `OrderAlreadyClosed` · `StackableMismatch` · `PlacementInvalid` ·
+`RateLimited`(429) · `IdempotencyInProgress`(409)

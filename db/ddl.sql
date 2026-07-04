@@ -148,6 +148,21 @@ CREATE TABLE market_config (
 );
 INSERT INTO market_config(key, value) VALUES ('fee_bps', '500');  -- 5.00%
 
+-- ----------------------------------------------------------------------------
+-- 멱등성 레코드 (POST /api/orders 재시도/중복 제출 방어)
+--   (player_id, key) 당 한 행. 클라이언트가 보낸 Idempotency-Key 헤더로 청구한다.
+--   원본 요청은 INSERT ON CONFLICT DO NOTHING 으로 슬롯을 선점(response=NULL)한 뒤
+--   처리 완료 시 직렬화된 ApiResponse<PlaceOrderResult> JSON을 response에 채운다.
+--   중복 요청은 저장된 response를 그대로 반환(아직 NULL이면 "처리중" 409).
+-- ----------------------------------------------------------------------------
+CREATE TABLE idempotency_record (
+    player_id  UUID        NOT NULL REFERENCES player(id),
+    key        TEXT        NOT NULL,
+    response   JSONB,                             -- NULL = 원본 처리중, 채워지면 완료 응답
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (player_id, key)
+);
+
 -- ============================================================================
 --  시드: 아이템 마스터 102종
 --  category: FOOD/MEDICAL/MELEE/GUN/AMMO

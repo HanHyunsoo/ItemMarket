@@ -460,6 +460,19 @@ public sealed class MarketRepository(string connectionString)
         await using var db = Open();
         await using var tx = await db.BeginTransactionAsync();
 
+        // 데드락 방지: 전역 락 순서 = wallet → market_order (SettleFillAsync와 동일).
+        //   과거엔 market_order를 먼저 FOR UPDATE로 잠근 뒤 wallet을 갱신해
+        //   순서가 정산과 반대(order→wallet)여서 동시 취소+정산이 교착(40P01)할 수 있었다.
+        //   player_id는 주문 생성 후 불변이므로, 잠그지 않은 SELECT로 먼저 읽어
+        //   그 지갑 행을 FOR UPDATE로 잠근 다음, 비로소 주문 행을 잠근다.
+        var ownerPid = await db.ExecuteScalarAsync<Guid?>(
+            "SELECT player_id FROM market_order WHERE id = @orderId", new { orderId }, tx);
+        if (ownerPid is null) { await tx.RollbackAsync(); throw new DomainException(ErrorCode.OrderNotFound, "주문을 찾을 수 없습니다."); }
+
+        // 지갑 행을 먼저 잠근다(매수 취소의 환불 대상; 매도 취소여도 순서 일관성을 위해 잠금).
+        await db.ExecuteScalarAsync<long?>(
+            "SELECT balance FROM wallet WHERE player_id = @pid FOR UPDATE", new { pid = ownerPid.Value }, tx);
+
         var r = await db.QuerySingleOrDefaultAsync(
             @"SELECT id, player_id, side, template_id, unit_price, quantity, remaining_quantity,
                      instance_id, status, escrow_caps, created_at
@@ -502,6 +515,52 @@ public sealed class MarketRepository(string connectionString)
         await tx.CommitAsync();
 
         return (o with { Status = OrderStatus.Cancelled, EscrowCaps = 0 }).ToDto();
+    }
+
+    // ======================================================================
+    //  멱등성(Idempotency) — 주문 등록 재시도/중복 제출 방어
+    //  (player_id, key) 당 한 행. INSERT ON CONFLICT DO NOTHING 으로 원자적 청구.
+    // ======================================================================
+
+    /// <summary>(player, key) 슬롯을 청구한다. 새로 삽입되면 true(원본), 이미 있으면 false(중복).</summary>
+    public async Task<bool> TryClaimIdempotencyAsync(Guid playerId, string key)
+    {
+        await using var db = Open();
+        var rows = await db.ExecuteAsync(
+            @"INSERT INTO idempotency_record(player_id, key, response)
+              VALUES (@playerId, @key, NULL)
+              ON CONFLICT (player_id, key) DO NOTHING",
+            new { playerId, key });
+        return rows == 1;
+    }
+
+    /// <summary>저장된 응답 JSON을 읽는다. 행이 없으면(이론상 불가) null, 아직 처리중이면 response=NULL.</summary>
+    public async Task<IdempotencyLookup> GetIdempotencyAsync(Guid playerId, string key)
+    {
+        await using var db = Open();
+        var row = await db.QuerySingleOrDefaultAsync(
+            "SELECT response::text AS response FROM idempotency_record WHERE player_id = @playerId AND key = @key",
+            new { playerId, key });
+        if (row is null) return new IdempotencyLookup(false, null);
+        return new IdempotencyLookup(true, (string?)row.response);
+    }
+
+    /// <summary>원본 요청 완료 후 직렬화된 응답 JSON을 저장한다.</summary>
+    public async Task StoreIdempotencyResponseAsync(Guid playerId, string key, string responseJson)
+    {
+        await using var db = Open();
+        await db.ExecuteAsync(
+            "UPDATE idempotency_record SET response = @responseJson::jsonb WHERE player_id = @playerId AND key = @key",
+            new { playerId, key, responseJson });
+    }
+
+    /// <summary>원본 처리가 실패하면 슬롯을 비워 재시도를 허용한다.</summary>
+    public async Task ReleaseIdempotencyAsync(Guid playerId, string key)
+    {
+        await using var db = Open();
+        await db.ExecuteAsync(
+            "DELETE FROM idempotency_record WHERE player_id = @playerId AND key = @key AND response IS NULL",
+            new { playerId, key });
     }
 
     // ======================================================================
