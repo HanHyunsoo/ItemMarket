@@ -25,3 +25,6 @@ Thumbs.db
 
 # ---- Docker volumes (로컬) ----
 pgdata/
+
+# ---- Claude worktrees (로컬 전용) ----
+.claude/worktrees/
