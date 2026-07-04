@@ -430,6 +430,39 @@ public sealed class MarketRepository(string connectionString)
         return rows.Select(r => (OrderRow)MapOrderRow(r)).ToList();
     }
 
+    /// <summary>
+    /// 밴드 매칭 엔진 재수화용: 특정 템플릿에서 <b>가격 밴드에 속한</b> 미체결 주문.
+    /// 밴드 = unit_price / bandSize (정수 나눗셈; 단가는 항상 양수라 절삭이 안전).
+    /// </summary>
+    public async Task<IReadOnlyList<OrderRow>> GetLiveOrdersInBandAsync(int templateId, int bandSize, long band)
+    {
+        await using var db = Open();
+        var rows = await db.QueryAsync(
+            @"SELECT id, player_id, side, template_id, unit_price, quantity, remaining_quantity,
+                     instance_id, status, escrow_caps, created_at
+              FROM market_order
+              WHERE template_id = @templateId AND status IN ('OPEN','PARTIALLY_FILLED')
+                    AND (unit_price / @bandSize) = @band
+              ORDER BY created_at",
+            new { templateId, bandSize, band });
+        return rows.Select(r => (OrderRow)MapOrderRow(r)).ToList();
+    }
+
+    /// <summary>
+    /// 코디네이터 스냅샷 팬아웃용: 특정 템플릿에서 미체결 주문이 존재하는 <b>밴드 목록</b>(중복 제거).
+    /// 밴드 = unit_price / bandSize.
+    /// </summary>
+    public async Task<IReadOnlyList<long>> GetLiveBandsAsync(int templateId, int bandSize)
+    {
+        await using var db = Open();
+        var rows = await db.QueryAsync<long>(
+            @"SELECT DISTINCT (unit_price / @bandSize) AS band
+              FROM market_order
+              WHERE template_id = @templateId AND status IN ('OPEN','PARTIALLY_FILLED')",
+            new { templateId, bandSize });
+        return rows.ToList();
+    }
+
     public async Task<PagedResult<OrderDto>> GetOrdersAdminAsync(int? templateId, OrderStatus? status, int page, int size)
     {
         await using var db = Open();

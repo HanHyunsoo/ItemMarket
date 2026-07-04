@@ -3,6 +3,7 @@ using ItemMarket.Api.Endpoints;
 using ItemMarket.Api.Hubs;
 using ItemMarket.Api.Infrastructure;
 using ItemMarket.Grains.Data;
+using ItemMarket.Grains.Grains;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -27,6 +28,14 @@ builder.AddMarketRateLimiting();
 
 // DI: 리포지토리(싱글턴, 소스오브트루스 = Postgres)
 builder.Services.AddSingleton(new MarketRepository(connString));
+
+// 매칭 엔진 옵션 — 가격 밴드 샤딩 스위치(Market:PriceBandSize, 기본 0=비활성).
+// 0이면 OrderBookGrain이 기존과 동일하게 템플릿당 단일 호가창을 직접 매칭한다.
+// >0이면 코디네이터가 밴드별 OrderBandGrain으로 라우팅하며, 코디네이터가 병목이 되지
+// 않도록 리엔트런시를 켠다(프로세스당 한 번 설정; 자세한 배경은 OrderBookGrain 참조).
+var priceBandSize = cfg.GetValue("Market:PriceBandSize", 0);
+builder.Services.AddSingleton(new MarketOptions(priceBandSize));
+OrderBookGrain.AllowInterleaving = priceBandSize > 0;
 
 // JSON: 열거형 문자열 직렬화 + camelCase(기본)
 builder.Services.ConfigureHttpJsonOptions(o =>
