@@ -10,6 +10,7 @@
 - 금액 단위: 병뚜껑(CAP), `long`(정수).
 - 오류: `Error.Code`(열거형, `ErrorCode`)로 분기, `Error.Message`로 표시.
   인증 실패는 `Unauthorized`(401), 권한 부족은 `Forbidden`(403).
+- 실시간: 호가창/체결/지갑 변경은 SignalR 허브 `/hubs/market`로 서버 푸시한다 — 계약은 [docs/realtime-contract.md](./realtime-contract.md) 참고.
 
 ## 인증 엔드포인트
 
