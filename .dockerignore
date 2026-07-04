@@ -1,0 +1,24 @@
+# .NET build output
+**/bin/
+**/obj/
+artifacts/
+
+# Node / web
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Tests are not part of the API image
+tests/
+
+# Local infra / data
+pgdata/
+.git/
+.github/
+.idea/
+.vs/
+.claude/
+
+# OS
+**/.DS_Store
+*.log

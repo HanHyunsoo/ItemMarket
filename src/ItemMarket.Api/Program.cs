@@ -15,7 +15,10 @@ var connString = cfg.GetConnectionString("Postgres")
 // 쓰면 ASPNETCORE_URLS 환경변수가 appsettings에 밀려 덮어써지지 못하므로, 한 머신에서
 // 여러 인스턴스를 띄우려면 이 방식이 필요하다. env Http__Port 로 인스턴스별 오버라이드.
 var httpPort = cfg.GetValue("Http:Port", 5080);
-builder.WebHost.UseUrls($"http://localhost:{httpPort}");
+// 바인딩 호스트도 소유 키(Http:Host)로 제어. 기본은 localhost(로컬 데모/멀티 인스턴스와
+// 동일 동작). 컨테이너에서는 Http__Host=0.0.0.0 으로 오버라이드해 컨테이너 밖에서 접근 가능.
+var httpHost = cfg["Http:Host"] ?? "localhost";
+builder.WebHost.UseUrls($"http://{httpHost}:{httpPort}");
 
 // Orleans 실로 co-host (클러스터링 localhost/adonet 스왑) — Infrastructure/OrleansHosting.cs
 builder.AddMarketOrleans(connString);
