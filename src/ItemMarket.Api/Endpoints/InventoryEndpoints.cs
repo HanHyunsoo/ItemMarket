@@ -9,7 +9,7 @@ public static class InventoryEndpoints
 {
     public static IEndpointRouteBuilder MapInventoryEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGroup("/api").RequireAuthorization()
+        app.MapGroup("/api").RequireAuthorization().WithTags("Inventory")
             .MapGet("/inventory", (ClaimsPrincipal u, IGrainFactory gf) =>
                 Exec(() => gf.GetGrain<IPlayerInventoryGrain>(CurrentPlayer(u)).Get()));
 

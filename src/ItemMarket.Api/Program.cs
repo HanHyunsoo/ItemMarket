@@ -23,6 +23,10 @@ builder.AddMarketOrleans(connString);
 // 인증(JWT Bearer) + 인가(admin 롤) + 토큰 발급기 — Infrastructure/AuthSetup.cs
 builder.AddMarketAuth();
 
+// Swagger/OpenAPI(/swagger) — JWT Bearer "Authorize" 포함. Infrastructure/SwaggerSetup.cs.
+// 서비스 등록은 무해(inert)하며 문서 생성은 첫 요청 시 lazy → 기존 테스트/데모 불변.
+builder.AddMarketOpenApi();
+
 // 레이트 리미팅(주문 등록, 플레이어별) — Infrastructure/RateLimiting.cs
 builder.AddMarketRateLimiting();
 
@@ -71,6 +75,9 @@ var app = builder.Build();
 
 ApiResults.Logger = app.Logger; // Exec 헬퍼의 예상외 예외 로깅용
 
+// 인터랙티브 API 문서(/swagger). 인증/인가 파이프라인 앞에 둬 익명 접근 가능.
+app.UseMarketOpenApi();
+
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -89,7 +96,7 @@ app.MapAdminEndpoints();
 // 실시간 허브 — docs/realtime-contract.md
 app.MapHub<MarketHub>("/hubs/market");
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
+app.MapGet("/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous().WithTags("System");
 
 app.Run();
 

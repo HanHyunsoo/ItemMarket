@@ -9,7 +9,7 @@ public static class WalletEndpoints
 {
     public static IEndpointRouteBuilder MapWalletEndpoints(this IEndpointRouteBuilder app)
     {
-        var api = app.MapGroup("/api").RequireAuthorization();
+        var api = app.MapGroup("/api").RequireAuthorization().WithTags("Wallet");
 
         api.MapGet("/wallet", (ClaimsPrincipal u, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IWalletGrain>(CurrentPlayer(u)).Get()));

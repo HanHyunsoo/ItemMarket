@@ -13,7 +13,7 @@ public static class AdminEndpoints
 {
     public static IEndpointRouteBuilder MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
-        var admin = app.MapGroup("/api/admin").RequireAuthorization("admin");
+        var admin = app.MapGroup("/api/admin").RequireAuthorization("admin").WithTags("Admin");
 
         admin.MapGet("/players/{id:guid}/wallet", (Guid id, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IWalletGrain>(id).Get()));

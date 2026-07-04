@@ -128,7 +128,7 @@ Vue 3 (Vite + Element Plus)  ──REST/JWT──▶  ASP.NET Core Minimal API
 # 1) DB (스키마 + 102종 아이템 마스터 + 시드 자동 적용)
 docker compose up -d
 
-# 2) 백엔드 (http://localhost:5080)
+# 2) 백엔드 (http://localhost:5080) — 인터랙티브 API 문서: http://localhost:5080/swagger
 dotnet run --project src/ItemMarket.Api
 
 # 3) 프론트 (http://localhost:5173)
