@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCatalogStore } from '@/stores/catalog'
 import { inventoryApi } from '@/api/endpoints'
@@ -7,6 +7,7 @@ import ItemSprite from '@/components/ItemSprite.vue'
 import RarityTag from '@/components/RarityTag.vue'
 import { dateTime, shortId } from '@/utils/format'
 import { toastError } from '@/utils/toast'
+import { onWalletChanged } from '@/realtime/marketHub'
 import type { InventoryDto } from '@/api/types'
 
 const catalog = useCatalogStore()
@@ -14,17 +15,29 @@ const router = useRouter()
 const inv = ref<InventoryDto | null>(null)
 const loading = ref(false)
 
+async function loadInventory() {
+  try {
+    inv.value = await inventoryApi.get()
+  } catch (err) {
+    toastError(err, 'Could not load inventory.')
+  }
+}
+
 onMounted(async () => {
   loading.value = true
   try {
     await catalog.ensureLoaded()
-    inv.value = await inventoryApi.get()
   } catch (err) {
-    toastError(err, 'Could not load inventory.')
-  } finally {
-    loading.value = false
+    toastError(err, 'Could not load the item catalog.')
   }
+  await loadInventory()
+  loading.value = false
 })
+
+// Live: a fill or order change touches inventory — refetch (WalletChanged fires for
+// both buyer and seller, which is exactly when stacks/instances move).
+const offWalletChanged = onWalletChanged(loadInventory)
+onUnmounted(offWalletChanged)
 
 const stacks = computed(() =>
   (inv.value?.stacks ?? []).map((s) => ({ ...s, tpl: catalog.get(s.templateId) })),

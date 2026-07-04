@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
@@ -7,6 +7,7 @@ import { walletApi } from '@/api/endpoints'
 import { SEED_PLAYERS } from '@/api/types'
 import { caps } from '@/utils/format'
 import { toastError, toastSuccess } from '@/utils/toast'
+import { onWalletChanged } from '@/realtime/marketHub'
 
 const auth = useAuthStore()
 const { isAdmin, isAuthenticated, playerId } = storeToRefs(auth)
@@ -48,6 +49,10 @@ async function refreshBalance() {
   }
 }
 watch([playerId, () => route.fullPath], refreshBalance, { immediate: true })
+
+// Live: a trade or order affecting this player pushes WalletChanged — refresh the chip.
+const offWalletChanged = onWalletChanged(refreshBalance)
+onUnmounted(offWalletChanged)
 
 async function onSelect(id: string) {
   if (!id) return

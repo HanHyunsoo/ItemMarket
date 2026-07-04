@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import AppHeader from '@/components/AppHeader.vue'
 import { useCatalogStore } from '@/stores/catalog'
 import { useAuthStore } from '@/stores/auth'
 import { toastError } from '@/utils/toast'
+import { restartConnection, stopConnection } from '@/realtime/marketHub'
 
 const catalog = useCatalogStore()
 const auth = useAuthStore()
@@ -18,6 +19,22 @@ onMounted(async () => {
       toastError(err, 'Could not load the item catalog.')
     }
   }
+})
+
+// Drive the app-wide SignalR connection off the signed-in player. `restartConnection`
+// covers both first sign-in and a player switch (the JWT — and thus the user group —
+// changes), while signing out tears the connection down.
+watch(
+  () => auth.playerId,
+  (id) => {
+    if (id) void restartConnection()
+    else void stopConnection()
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  void stopConnection()
 })
 </script>
 
