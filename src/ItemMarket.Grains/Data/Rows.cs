@@ -1,9 +1,18 @@
 using ItemMarket.Contracts.Orders;
+using ItemMarket.Contracts.Stash;
 
 namespace ItemMarket.Grains.Data;
 
 /// <summary>플레이어 마스터 한 줄.</summary>
 public sealed record PlayerRow(Guid Id, string DisplayName);
+
+/// <summary>스태시 배치 한 줄(stash_placement 원본). 유니크는 InstanceId 사용.</summary>
+public sealed record StashPlacementRow(
+    StashEntryKind Kind,
+    int TemplateId,
+    Guid? InstanceId,
+    int X,
+    int Y);
 
 /// <summary>매칭에 필요한 아이템 템플릿 속성.</summary>
 public sealed record TemplateRow(int Id, bool Stackable);

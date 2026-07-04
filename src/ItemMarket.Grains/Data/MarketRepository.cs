@@ -2,6 +2,7 @@ using Dapper;
 using ItemMarket.Contracts.Common;
 using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Orders;
+using ItemMarket.Contracts.Stash;
 using ItemMarket.Contracts.Trades;
 using ItemMarket.Contracts.Wallet;
 using Npgsql;
@@ -51,12 +52,13 @@ public sealed class MarketRepository(string connectionString)
     {
         await using var db = Open();
         var rows = await db.QueryAsync(
-            @"SELECT id, code, name, category, rarity, stackable, max_durability, icon, base_value
+            @"SELECT id, code, name, category, rarity, stackable, max_durability, icon, base_value, grid_w, grid_h
               FROM item_template ORDER BY id");
         return rows.Select(r => new ItemTemplateDto(
             (int)r.id, (string)r.code, (string)r.name,
             Enums.ToCategory((string)r.category), Enums.ToRarity((string)r.rarity),
-            (bool)r.stackable, (int?)r.max_durability, (string)r.icon, (long)r.base_value)).ToList();
+            (bool)r.stackable, (int?)r.max_durability, (string)r.icon, (long)r.base_value,
+            (int)r.grid_w, (int)r.grid_h)).ToList();
     }
 
     public async Task<TemplateRow?> GetTemplateAsync(int id)
@@ -304,6 +306,65 @@ public sealed class MarketRepository(string connectionString)
               ON CONFLICT (player_id, template_id)
               DO UPDATE SET quantity = inventory_stack.quantity + EXCLUDED.quantity",
             new { playerId, templateId, qty }, tx);
+
+    // ======================================================================
+    //  스태시(그리드 인벤토리)
+    //  Postgres가 소스오브트루스. 배치는 (player, template, kind) 또는 instance 단위로 유일.
+    // ======================================================================
+
+    /// <summary>플레이어의 모든 스태시 배치를 로드.</summary>
+    public async Task<IReadOnlyList<StashPlacementRow>> GetStashPlacementsAsync(Guid playerId)
+    {
+        await using var db = Open();
+        var rows = await db.QueryAsync(
+            "SELECT kind, template_id, instance_id, x, y FROM stash_placement WHERE player_id = @playerId",
+            new { playerId });
+        return rows.Select(r => new StashPlacementRow(
+            Enums.ToStashKind((string)r.kind), (int)r.template_id, (Guid?)r.instance_id,
+            (int)r.x, (int)r.y)).ToList();
+    }
+
+    /// <summary>스택형 배치 upsert: (player, template) 당 한 칸. 위치만 갱신.</summary>
+    public async Task UpsertStackPlacementAsync(Guid playerId, int templateId, int x, int y)
+    {
+        await using var db = Open();
+        await db.ExecuteAsync(
+            @"INSERT INTO stash_placement(player_id, kind, template_id, instance_id, x, y)
+              VALUES (@playerId, 'STACK', @templateId, NULL, @x, @y)
+              ON CONFLICT (player_id, template_id, kind)
+              DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y",
+            new { playerId, templateId, x, y });
+    }
+
+    /// <summary>유니크 배치 upsert: 인스턴스 단위로 유일. 위치만 갱신.</summary>
+    public async Task UpsertInstancePlacementAsync(Guid playerId, int templateId, Guid instanceId, int x, int y)
+    {
+        await using var db = Open();
+        await db.ExecuteAsync(
+            @"INSERT INTO stash_placement(player_id, kind, template_id, instance_id, x, y)
+              VALUES (@playerId, 'INSTANCE', @templateId, @instanceId, @x, @y)
+              ON CONFLICT (instance_id)
+              DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y, player_id = EXCLUDED.player_id",
+            new { playerId, templateId, instanceId, x, y });
+    }
+
+    /// <summary>더 이상 소유하지 않는 스택형 배치 정리.</summary>
+    public async Task DeleteStackPlacementAsync(Guid playerId, int templateId)
+    {
+        await using var db = Open();
+        await db.ExecuteAsync(
+            "DELETE FROM stash_placement WHERE player_id = @playerId AND kind = 'STACK' AND template_id = @templateId",
+            new { playerId, templateId });
+    }
+
+    /// <summary>더 이상 소유하지 않는 유니크 배치 정리.</summary>
+    public async Task DeleteInstancePlacementAsync(Guid playerId, Guid instanceId)
+    {
+        await using var db = Open();
+        await db.ExecuteAsync(
+            "DELETE FROM stash_placement WHERE player_id = @playerId AND kind = 'INSTANCE' AND instance_id = @instanceId",
+            new { playerId, instanceId });
+    }
 
     // ======================================================================
     //  주문

@@ -1,5 +1,6 @@
 using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Orders;
+using ItemMarket.Contracts.Stash;
 using ItemMarket.Contracts.Wallet;
 
 namespace ItemMarket.Grains.Data;
@@ -55,6 +56,10 @@ public static class Enums
         "ADMIN_ADJUST" => WalletLedgerReason.AdminAdjust,
         _ => WalletLedgerReason.AdminAdjust
     };
+
+    // --- StashEntryKind ----------------------------------------------------
+    public static string ToDb(this StashEntryKind k) => k == StashEntryKind.Instance ? "INSTANCE" : "STACK";
+    public static StashEntryKind ToStashKind(string k) => k == "INSTANCE" ? StashEntryKind.Instance : StashEntryKind.Stack;
 
     // --- ItemCategory ------------------------------------------------------
     public static ItemCategory ToCategory(string c) => c switch
