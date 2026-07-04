@@ -1,5 +1,7 @@
+using ItemMarket.Api.Infrastructure;
 using ItemMarket.Contracts.Admin;
 using ItemMarket.Contracts.Orders;
+using ItemMarket.Contracts.Trades;
 using ItemMarket.Grains.Abstractions;
 using ItemMarket.Grains.Data;
 using static ItemMarket.Api.Infrastructure.ApiResults;
@@ -25,11 +27,15 @@ public static class AdminEndpoints
         admin.MapPost("/grant/instance", (AdminGrantInstanceRequest req, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IPlayerInventoryGrain>(req.PlayerId).AdminGrantInstance(req.TemplateId, req.Durability, req.Attachments)));
 
-        admin.MapPost("/orders/force-cancel", (AdminForceCancelOrderRequest req, IGrainFactory gf, MarketRepository repo) => Exec(async () =>
+        admin.MapPost("/orders/force-cancel", (AdminForceCancelOrderRequest req, IGrainFactory gf, MarketRepository repo, IMarketNotifier notifier) => Exec(async () =>
         {
             var order = await repo.GetOrderAsync(req.OrderId)
                 ?? throw new DomainException(ErrorCode.OrderNotFound, "주문을 찾을 수 없습니다.");
-            return await gf.GetGrain<IOrderBookGrain>(order.TemplateId).CancelOrder(order.PlayerId, req.OrderId, isAdmin: true);
+            var grain = gf.GetGrain<IOrderBookGrain>(order.TemplateId);
+            var result = await grain.CancelOrder(order.PlayerId, req.OrderId, isAdmin: true);
+            // 에스크로가 환불되는 주문 소유자에게 지갑 변동을 알린다(+ 갱신 호가창).
+            await notifier.PublishOrderActivityAsync(await grain.GetSnapshot(), order.PlayerId, Array.Empty<TradeDto>());
+            return result;
         }));
 
         admin.MapGet("/orders", (MarketRepository repo, int? templateId, string? status, int page = 1, int size = 20) =>
