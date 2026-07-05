@@ -58,8 +58,9 @@
 | GET | `/api/wallet` | - | `WalletDto` (현재 플레이어) |
 | GET | `/api/wallet/ledger?page=&size=` | - | `PagedResult<WalletLedgerEntryDto>` |
 | GET | `/api/inventory` | - | `InventoryDto` (스택 + 유니크 인스턴스) |
-| GET | `/api/stash` | - | `StashDto` (그리드 배치 + 미배치, 현재 플레이어) |
-| POST | `/api/stash/move` | `MoveStashItemRequest` | `StashDto` (이동 후 스냅샷) |
+| GET | `/api/stash` | - | `StashDto` (STASH 컨테이너, 하위호환) |
+| GET | `/api/stash/{container}` | - | `StashDto` (지정 컨테이너: `stash`\|`loadout`, 대소문자 무시) |
+| POST | `/api/stash/move` | `MoveStashItemRequest` | `StashDto` (이동 후 `ToContainer` 스냅샷) |
 | GET | `/api/market/{templateId}/book` | - | `OrderBookSnapshotDto` (호가창) |
 | GET | `/api/market/{templateId}/trades?page=&size=` | - | `PagedResult<TradeDto>` (체결 내역) |
 | POST | `/api/orders` | `PlaceOrderRequest` | `PlaceOrderResult` (잔여 주문 + 즉시 체결분) |
@@ -94,20 +95,38 @@
 - **부분 체결**: 남은 물량은 호가창에 잔존(`PartiallyFilled`).
 - **수수료**: 체결 시 판매 대금의 `fee_bps`(기본 5%)를 판매자 수령액에서 차감·소각(sink).
 
-## 그리드 스태시 규칙
+## 그리드 스태시 규칙 (컨테이너: STASH / LOADOUT)
 
-- **고정 그리드**: 플레이어당 **10칸(폭) × 12칸(높이)**. 좌상단 (0,0) 기준.
-  크기는 `StashDto.GridW/GridH`로 반환.
+- **컨테이너 2종**: 플레이어당 두 개의 그리드가 있다.
+  - `STASH` = 안전 보관소 **10×12**. 소유 아이템의 기본 보관 위치.
+  - `LOADOUT` = 레이드에 들고 나가는 칸 **6×8**. 비어서 시작하며 이동(반입/반출)으로만 채워진다.
+  - 크기는 `StashDto.GridW/GridH`, 어느 컨테이너인지는 `StashDto.Container`(`Stash`\|`Loadout`).
+  - 각 배치(`StashPlacementDto`)도 `Container`를 갖는다. 열거값은 PascalCase로 직렬화.
 - **footprint**: 아이템은 좌상단 `(x,y)`에서 템플릿의 `grid_w × grid_h` 칸을 차지한다.
-  스택형(FOOD/MEDICAL/AMMO)은 (플레이어, 템플릿)당 **1×1** 한 칸, 유니크(MELEE/GUN)는
-  인스턴스별로 템플릿 footprint(예: AK-47 4×2)를 차지한다.
-- **자동 배치**: `GET /api/stash`는 소유 아이템 중 아직 배치되지 않은 것을 좌상단→오른쪽→아래
-  순서로 스캔해 first-fit으로 자동 배치·영속화한다. 이미 배치된 아이템은 자리를 유지한다.
-  그리드가 가득 차 들어갈 자리가 없는 항목은 `Unplaced`(대기 트레이)로 반환된다.
-- **이동(`POST /api/stash/move`)**: 서버 권위 검증 — 소유권 + 경계(footprint가 그리드 안) +
-  겹침(다른 배치와 충돌 금지, 이동 대상 자신은 제외). 위반 시 `PlacementInvalid`(400).
-  플레이어당 grain 단일 활성화로 동시 이동이 직렬화된다(락 불필요).
-- 대상 지정: 스택 이동은 `Kind=Stack`+`TemplateId`, 유니크 이동은 `Kind=Instance`+`InstanceId`.
+  스택형(FOOD/MEDICAL/AMMO)은 컨테이너당 **1×1** 한 칸(+그 컨테이너에 담긴 `Quantity`),
+  유니크(MELEE/GUN)는 인스턴스별로 템플릿 footprint(예: AK-47 4×2)를 차지한다.
+- **소유권 모델(중복 없음)**: 아이템(스택 수량의 일부 / 인스턴스)은 **정확히 한 컨테이너**에 놓인다.
+  컨테이너 배치는 조직화(위치/반입 여부)일 뿐이고, 총 소유량의 진실은 인벤토리다 →
+  `GET /api/inventory` 총량은 컨테이너 이동과 무관하게 항상 보존된다(반입/반출로 늘거나 줄지 않음).
+- **자동 배치**: `GET /api/stash/{container}`는 아직 어디에도 배치되지 않은 소유 아이템을
+  좌상단→오른쪽→아래 first-fit으로 **STASH에** 자동 배치·영속화한다(어느 컨테이너를 조회해도
+  누락분은 STASH로 회수 → 유실 방지). LOADOUT은 자동 배치 대상이 아니다. 이미 배치된 아이템은
+  자리를 유지하며, STASH가 가득 차 못 들어간 항목은 STASH 뷰의 `Unplaced`로 반환된다.
+- **이동(`POST /api/stash/move`)**: `FromContainer`/`ToContainer`로 두 가지를 모두 처리한다.
+  - **같은 컨테이너 재배치**(`From==To`): 위치만 갱신.
+  - **컨테이너 간 이동**(`From!=To`, stash↔loadout = 반입/반출): 원본에서 빼고 대상에 넣는 것을
+    **원자적으로** 수행한다.
+  - 서버 권위 검증 — 소유권 + 경계(footprint가 대상 컨테이너 안) + 겹침(대상 컨테이너의 다른
+    배치와 충돌 금지, 이동 대상 자신은 제외). 위반 시 `PlacementInvalid`(400).
+  - 응답은 `ToContainer`의 이동 후 스냅샷. 플레이어당 grain 단일 활성화로 모든 컨테이너 조작이
+    직렬화된다(컨테이너 간 이동 포함, 락 불필요).
+- **대상 지정 & 수량**:
+  - 스택 이동은 `Kind=Stack`+`TemplateId`, 유니크 이동은 `Kind=Instance`+`InstanceId`.
+  - 스택의 **컨테이너 간 부분 이동**은 `Quantity`로 옮길 개수를 지정(미지정 시 원본 컨테이너의
+    전체 수량). 대상 컨테이너에 같은 스택 칸이 이미 있으면 그 칸에 수량이 합산된다(위치 유지).
+  - 유니크 인스턴스는 항상 통째로 이동하며 `Quantity`는 무시된다.
+  - 필드(`FromContainer`/`ToContainer`/`Quantity`)는 모두 선택적이며 기본값은 STASH/STASH/전체라,
+    기존 단일-스태시 이동 호출과 호환된다.
 
 ## 멱등성 (`POST /api/orders`)
 
