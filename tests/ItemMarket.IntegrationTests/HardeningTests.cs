@@ -9,13 +9,13 @@ using ItemMarket.Contracts.Trades;
 using ItemMarket.Contracts.Wallet;
 using Xunit;
 using static ItemMarket.IntegrationTests.MarketAppFixture;
-using ErrorCode = ItemMarket.Contracts.Common.ErrorCode; // Orleans.ErrorCode와 모호성 방지
 
 namespace ItemMarket.IntegrationTests;
 
 /// <summary>
-/// 백엔드 하드닝(quality bundle) 통합테스트: 취소↔정산 락 순서 일관성(A1) +
-/// 주문 등록 멱등성(A2). 각 테스트는 아직 쓰지 않은 템플릿으로 호가창을 격리한다.
+/// 백엔드 하드닝(quality bundle) 통합테스트: 취소↔정산 락 순서 일관성(A1).
+/// 주문 등록 멱등성(A2)은 Redis로 이관되어 IdempotencyRedisTests로 분리했다.
+/// 각 테스트는 아직 쓰지 않은 템플릿으로 호가창을 격리한다.
 /// </summary>
 [Collection("market")]
 public class HardeningTests(MarketAppFixture f)
@@ -122,67 +122,5 @@ public class HardeningTests(MarketAppFixture f)
         Assert.Equal(rounds, await StackQty(buyer, t2)); // 모든 t2 매수 체결 → 15개 수령
     }
 
-    // ==================================================================== A2
-
-    // 같은 Idempotency-Key로 두 번 → 주문 1건, DB 행 1개, 동일 응답.
-    [Fact]
-    public async Task Same_idempotency_key_places_exactly_one_order()
-    {
-        var buyer = await _f.AuthedAs(Alpha);
-        var key = $"idem-{Guid.NewGuid()}";
-        const int template = 8; // 매도자 없음 → 잔존
-
-        var first = await Api<PlaceOrderResult>(await PostOrder(buyer,
-            new PlaceOrderRequest(OrderSide.Buy, template, 10, 1), key));
-        var second = await Api<PlaceOrderResult>(await PostOrder(buyer,
-            new PlaceOrderRequest(OrderSide.Buy, template, 10, 1), key));
-
-        Assert.True(first.Success);
-        Assert.True(second.Success);
-        // 동일 주문 id → 재실행되지 않고 저장된 응답을 반환.
-        Assert.Equal(first.Data!.Order.Id, second.Data!.Order.Id);
-
-        // 이 템플릿의 내 주문은 정확히 1건.
-        var mine = (await Api<List<OrderDto>>(await buyer.GetAsync("/api/orders"))).Data!;
-        Assert.Single(mine, o => o.ItemTemplateId == template);
-    }
-
-    // 서로 다른 키 → 서로 다른 주문 2건.
-    [Fact]
-    public async Task Different_idempotency_keys_place_two_orders()
-    {
-        var buyer = await _f.AuthedAs(Alpha);
-        const int template = 9;
-
-        var a = await Api<PlaceOrderResult>(await PostOrder(buyer,
-            new PlaceOrderRequest(OrderSide.Buy, template, 10, 1), $"idem-{Guid.NewGuid()}"));
-        var b = await Api<PlaceOrderResult>(await PostOrder(buyer,
-            new PlaceOrderRequest(OrderSide.Buy, template, 10, 1), $"idem-{Guid.NewGuid()}"));
-
-        Assert.True(a.Success && b.Success);
-        Assert.NotEqual(a.Data!.Order.Id, b.Data!.Order.Id);
-
-        var mine = (await Api<List<OrderDto>>(await buyer.GetAsync("/api/orders"))).Data!;
-        Assert.Equal(2, mine.Count(o => o.ItemTemplateId == template));
-    }
-
-    // 실패한 원본은 슬롯을 비워 같은 키로 재시도가 가능해야 한다.
-    [Fact]
-    public async Task Failed_original_releases_key_for_retry()
-    {
-        var buyer = await _f.AuthedAs(Alpha);
-        var key = $"idem-{Guid.NewGuid()}";
-        const int template = 10;
-
-        // 1) 잔액 초과 매수 → 실패(InsufficientFunds). 슬롯은 해제되어야 한다.
-        var fail = await Api<PlaceOrderResult>(await PostOrder(buyer,
-            new PlaceOrderRequest(OrderSide.Buy, template, 1000, 1000000), key)); // 10억 CAP
-        Assert.False(fail.Success);
-        Assert.Equal(ErrorCode.InsufficientFunds, fail.Error!.Code);
-
-        // 2) 같은 키로 유효한 주문 재시도 → 이번엔 성공(슬롯이 비워졌으므로).
-        var ok = await Api<PlaceOrderResult>(await PostOrder(buyer,
-            new PlaceOrderRequest(OrderSide.Buy, template, 5, 1), key));
-        Assert.True(ok.Success);
-    }
+    // A2(주문 등록 멱등성)는 Redis로 이관되어 IdempotencyRedisTests(redis-market 컬렉션)로 옮겼다.
 }
