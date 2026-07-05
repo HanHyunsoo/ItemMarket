@@ -65,7 +65,7 @@ export const equipmentApi = {
 }
 
 export const stashApi = {
-  // container is PascalCase in the model; the route segment is lowercase (stash|loadout).
+  // container is PascalCase in the model; the route segment is lowercase (stash|pockets).
   get: (container: GridContainer = 'Stash') =>
     api.get<StashDto>(`/api/stash/${container.toLowerCase()}`),
   // move returns the toContainer's snapshot; callers reconcile the fromContainer separately.

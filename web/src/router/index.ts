@@ -21,12 +21,12 @@ const routes: RouteRecordRaw[] = [
   },
   {
     // Unified inventory + equipment (stash grid + character doll + nested grids
-    // + carry loadout). Absorbs the old separate Loadout screen.
+    // + innate pockets). Absorbs the old separate Loadout screen.
     path: '/gear',
     name: 'gear',
     component: () => import('@/views/GearView.vue'),
   },
-  // Legacy paths → unified gear screen.
+  // Legacy paths → unified gear screen (loadout no longer exists; pockets replaced it).
   { path: '/stash', redirect: { name: 'gear' } },
   { path: '/loadout', redirect: { name: 'gear' } },
   {

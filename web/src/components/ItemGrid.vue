@@ -7,9 +7,10 @@ import { rarityColor, rarityGlow } from '@/utils/format'
 import { useGridDnd } from '@/composables/useGridDnd'
 import type { GridContainer, StashDto, StashPlacementDto } from '@/api/types'
 
-// A single spatial grid (Stash or Loadout) rendered from a StashDto. Handles
-// drag/drop — including cross-grid moves via the shared useGridDnd state — and
-// emits a `move` request for the parent to reconcile with the server.
+// A single spatial grid (Stash, Pockets, or a nested backpack/rig Container)
+// rendered from a StashDto. Handles drag/drop — including cross-grid moves via the
+// shared useGridDnd state — and emits a `move` request for the parent to reconcile
+// with the server.
 const props = withDefaults(
   defineProps<{
     stash: StashDto
@@ -66,9 +67,19 @@ const gridStyle = computed(() => ({
   backgroundSize: `${CELL.value}px ${CELL.value}px`,
 }))
 
-// A placement is identified by its instance id, or its template id for stacks.
+// A placement is identified by its instance id, or by template+cell for stacks.
+// Multi-stack: the same template can appear in more than one placement in a single
+// grid (each capped at maxStack), so the template id alone is not a safe/unique key —
+// the cell it occupies disambiguates it.
 function keyOf(p: StashPlacementDto): string {
-  return p.kind === 'Instance' ? `i:${p.instanceId}` : `s:${p.templateId}`
+  return p.kind === 'Instance' ? `i:${p.instanceId}` : `s:${p.templateId}:${p.x}:${p.y}`
+}
+
+// Unplaced (tray) entries don't occupy a meaningful cell, so key them by list index
+// instead — still stable within a render pass, and avoids collisions between multiple
+// waiting stacks of the same template.
+function trayKeyOf(p: StashPlacementDto, idx: number): string {
+  return p.kind === 'Instance' ? `i:${p.instanceId}` : `u:${idx}:${p.templateId}`
 }
 
 function tileStyle(p: StashPlacementDto) {
@@ -222,8 +233,8 @@ function onDragEnd(): void {
       <p class="tray-note wx-muted mono">Grid full — {{ unplaced.length }} item(s) waiting for space.</p>
       <div class="tray">
         <div
-          v-for="p in unplaced"
-          :key="keyOf(p)"
+          v-for="(p, idx) in unplaced"
+          :key="trayKeyOf(p, idx)"
           class="tray-item"
           :title="nameOf(p)"
           @click="emit('inspect', p)"
