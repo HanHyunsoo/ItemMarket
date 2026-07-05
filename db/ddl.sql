@@ -406,6 +406,42 @@ INSERT INTO item_template
 (101,'ammo_arrow',    '화살',             'AMMO','COMMON',  true, NULL,'ammo_shell',   4),
 (102,'ammo_flare',    '조명탄',           'AMMO','UNCOMMON',true, NULL,'ammo_shell',  10);
 
+-- ---- 신규 스택/유니크 아이템(107+) : FOOD/MEDICAL/MELEE/GUN/AMMO 라운드아웃 -------------
+-- 기존 id 1~106 은 그대로 두고 append 만 한다(통합테스트/시드 인벤토리가 특정 id에 의존).
+INSERT INTO item_template
+    (id, code, name, category, rarity, stackable, max_durability, icon, base_value) VALUES
+-- 먹을거 (FOOD) 107-112
+(107,'jam_jar',       '잼 병',           'FOOD','COMMON',  true, NULL,'jam_jar',       9),
+(108,'protein_powder','단백질 파우더',   'FOOD','UNCOMMON',true, NULL,'protein_powder',24),
+(109,'apple',         '사과',            'FOOD','COMMON',  true, NULL,'apple',         5),
+(110,'mushrooms',     '버섯',            'FOOD','UNCOMMON',true, NULL,'mushrooms',    14),
+(111,'canned_ham',    '햄 통조림',       'FOOD','UNCOMMON',true, NULL,'canned_ham',   19),
+(112,'field_ration',  '야전식량',        'FOOD','RARE',    true, NULL,'field_ration', 42),
+-- 힐템 (MEDICAL) 113-117
+(113,'stimulant_syringe','자극제 주사기','MEDICAL','RARE',    true, NULL,'stimulant_syringe',85),
+(114,'inhaler',       '흡입기',          'MEDICAL','UNCOMMON',true, NULL,'inhaler',      30),
+(115,'antiseptic_spray','소독 스프레이', 'MEDICAL','UNCOMMON',true, NULL,'antiseptic_spray',22),
+(116,'saline_bag',    '수액팩',          'MEDICAL','RARE',    true, NULL,'saline_bag',  120),
+(117,'medical_gel',   '의료용 젤',       'MEDICAL','UNCOMMON',true, NULL,'medical_gel',  27),
+-- 근접무기 (MELEE) 118-122 - 유니크 인스턴스
+(118,'combat_axe',    '전투 도끼',       'MELEE','RARE',    false,160,'combat_axe',   240),
+(119,'war_hammer',    '워해머',          'MELEE','RARE',    false,190,'war_hammer',   230),
+(120,'tactical_tomahawk','전술 토마호크','MELEE','UNCOMMON',false,120,'tactical_tomahawk',130),
+(121,'steel_pipe',    '강철 파이프',     'MELEE','COMMON',  false,150,'steel_pipe',    45),
+(122,'long_spear',    '장창',            'MELEE','UNCOMMON',false, 80,'long_spear',    95),
+-- 총 (GUN) 123-127 - 유니크 인스턴스
+(123,'magnum_revolver','매그넘 리볼버',  'GUN','EPIC',     false,350,'magnum_revolver',2400),
+(124,'vector_smg',    '벡터 기관단총',   'GUN','EPIC',     false,320,'vector_smg',   3000),
+(125,'tactical_shotgun','전술 샷건',     'GUN','EPIC',     false,360,'tactical_shotgun',2000),
+(126,'marksman_rifle','지정사수 소총',   'GUN','LEGENDARY',false,420,'marksman_rifle',6500),
+(127,'rocket_launcher','로켓 발사기',    'GUN','LEGENDARY',false,300,'rocket_launcher',15000),
+-- 탄약 (AMMO) 128-132 - 스택형
+(128,'ammo_38special','.38 스페셜 탄약', 'AMMO','COMMON',  true, NULL,'ammo_38special', 5),
+(129,'ammo_44magnum', '.44 매그넘 탄약', 'AMMO','RARE',    true, NULL,'ammo_44magnum', 13),
+(130,'ammo_slug',     '산탄 슬러그',     'AMMO','UNCOMMON',true, NULL,'ammo_slug',     10),
+(131,'ammo_762x54',   '7.62x54R 탄약',   'AMMO','RARE',    true, NULL,'ammo_762x54',   12),
+(132,'ammo_50cal',    '.50 구경 탄약',   'AMMO','EPIC',    true, NULL,'ammo_50cal',    30);
+
 -- 장비/컨테이너 (GEAR) - 유니크 인스턴스. 백팩/리그는 내부 그리드(중첩 컨테이너) 보유 ---------
 INSERT INTO item_template
     (id, code, name, category, rarity, stackable, max_durability, icon, base_value,
@@ -413,7 +449,29 @@ INSERT INTO item_template
 (103,'combat_helmet','전투 헬멧',   'GEAR','RARE',    false,120,'equip_helmet',   300, 2, 2,'HELMET',   false, NULL, NULL),
 (104,'body_armor',   '방탄 조끼',   'GEAR','EPIC',    false,240,'equip_armor',    900, 2, 3,'ARMOR',    false, NULL, NULL),
 (105,'tactical_rig', '전술 리그',   'GEAR','RARE',    false,100,'equip_rig',      450, 2, 2,'RIG',      true,     4,    3),
-(106,'backpack',     '배낭',        'GEAR','UNCOMMON',false,100,'equip_backpack', 350, 3, 3,'BACKPACK', true,     5,    5);
+(106,'backpack',     '배낭',        'GEAR','UNCOMMON',false,100,'equip_backpack', 350, 3, 3,'BACKPACK', true,     5,    5),
+-- ---- 신규 장비 패밀리(133-149) : 헬멧/방어구 티어 + 리그/백팩 내부그리드 크기 ----------
+-- 헬멧(HELMET) 133-137 : 경량 → 중장 티어. 색조로 티어를 구분한다.
+(133,'light_helmet',    '경량 헬멧',   'GEAR','UNCOMMON',false, 70,'light_helmet',    180, 2, 2,'HELMET', false, NULL, NULL),
+(134,'tactical_helmet', '전술 헬멧',   'GEAR','RARE',    false,110,'tactical_helmet', 320, 2, 2,'HELMET', false, NULL, NULL),
+(135,'heavy_helmet',    '중장 헬멧',   'GEAR','EPIC',    false,180,'heavy_helmet',    650, 2, 2,'HELMET', false, NULL, NULL),
+(136,'ballistic_helmet','방탄 헬멧',   'GEAR','EPIC',    false,200,'ballistic_helmet',720, 2, 2,'HELMET', false, NULL, NULL),
+(137,'riot_helmet',     '방폭 헬멧',   'GEAR','RARE',    false,150,'riot_helmet',     400, 2, 2,'HELMET', false, NULL, NULL),
+-- 방어구(ARMOR) 138-141 : 케블라/플레이트/중장/방폭.
+(138,'kevlar_vest',     '케블라 조끼', 'GEAR','RARE',    false,160,'kevlar_vest',     500, 2, 3,'ARMOR',  false, NULL, NULL),
+(139,'plate_carrier',   '플레이트 캐리어','GEAR','EPIC', false,260,'plate_carrier',  1100, 2, 3,'ARMOR',  false, NULL, NULL),
+(140,'heavy_armor',     '중장갑 방어구','GEAR','LEGENDARY',false,360,'heavy_armor',   1800, 2, 3,'ARMOR',  false, NULL, NULL),
+(141,'riot_armor',      '방폭 방어구', 'GEAR','RARE',    false,220,'riot_armor',      600, 2, 3,'ARMOR',  false, NULL, NULL),
+-- 체스트 리그(RIG) 142-145 : 내부 그리드 크기 3×2 → 4×4.
+(142,'light_rig',   '경량 리그',   'GEAR','UNCOMMON',false, 60,'light_rig',   200, 2, 2,'RIG', true, 3, 2),
+(143,'scout_rig',   '정찰 리그',   'GEAR','RARE',    false, 90,'scout_rig',   360, 2, 2,'RIG', true, 3, 3),
+(144,'assault_rig', '돌격 리그',   'GEAR','RARE',    false,120,'assault_rig', 560, 2, 3,'RIG', true, 4, 3),
+(145,'heavy_rig',   '중장 리그',   'GEAR','EPIC',    false,150,'heavy_rig',   820, 2, 3,'RIG', true, 4, 4),
+-- 백팩(BACKPACK) 146-149 : 소형 3×3 → 대형 5×5 + 더플백.
+(146,'small_backpack', '소형 배낭', 'GEAR','COMMON',  false, 80,'small_backpack', 220, 2, 2,'BACKPACK', true, 3, 3),
+(147,'medium_backpack','중형 배낭', 'GEAR','UNCOMMON',false,110,'medium_backpack',420, 3, 3,'BACKPACK', true, 4, 4),
+(148,'large_backpack', '대형 배낭', 'GEAR','RARE',    false,140,'large_backpack', 780, 3, 4,'BACKPACK', true, 5, 5),
+(149,'duffel_bag',     '더플백',    'GEAR','UNCOMMON',false,120,'duffel_bag',     500, 3, 3,'BACKPACK', true, 5, 5);
 
 -- 기존 총(GUN) 카탈로그를 WEAPON 슬롯 장착 가능으로 매핑.
 UPDATE item_template SET equip_slot = 'WEAPON' WHERE category = 'GUN';
@@ -421,24 +479,32 @@ UPDATE item_template SET equip_slot = 'WEAPON' WHERE category = 'GUN';
 -- ---- 스태시 footprint(grid_w×grid_h) --------------------------------------
 -- 스택형(FOOD/MEDICAL/AMMO)은 기본 1×1. 유니크 무기만 크기를 준다.
 UPDATE item_template SET grid_w = 1, grid_h = 2
-  WHERE code IN ('kitchen_knife','combat_knife','cleaver','brass_knuckles','hatchet','machinist_hammer');
+  WHERE code IN ('kitchen_knife','combat_knife','cleaver','brass_knuckles','hatchet','machinist_hammer',
+                 'tactical_tomahawk');
 UPDATE item_template SET grid_w = 1, grid_h = 3
   WHERE code IN ('machete','baseball_bat','nail_bat','crowbar','fire_axe','pipe_wrench','katana',
-                 'shovel','pitchfork','police_baton','spiked_mace','wooden_spear','scythe');
+                 'shovel','pitchfork','police_baton','spiked_mace','wooden_spear','scythe',
+                 'combat_axe','steel_pipe','long_spear');
 UPDATE item_template SET grid_w = 2, grid_h = 3
-  WHERE code IN ('sledgehammer','chainsaw');
+  WHERE code IN ('sledgehammer','chainsaw','war_hammer');
 -- 총: 권총류 2×2, 소총/샷건류 4×2
 UPDATE item_template SET grid_w = 2, grid_h = 2
-  WHERE code IN ('makarov_pistol','glock_pistol','revolver','desert_eagle','flare_gun','nail_gun');
+  WHERE code IN ('makarov_pistol','glock_pistol','revolver','desert_eagle','flare_gun','nail_gun',
+                 'magnum_revolver');
 UPDATE item_template SET grid_w = 4, grid_h = 2
   WHERE code IN ('sawed_shotgun','pump_shotgun','double_shotgun','uzi_smg','mp5_smg','ak47_rifle',
-                 'm4_rifle','hunting_rifle','sniper_rifle','lever_rifle','crossbow','compound_bow','grenade_launcher');
+                 'm4_rifle','hunting_rifle','sniper_rifle','lever_rifle','crossbow','compound_bow','grenade_launcher',
+                 'vector_smg','tactical_shotgun','marksman_rifle','rocket_launcher');
 
 -- ---- max_stack (한 칸에 쌓을 수 있는 최대 수량) : 카테고리 기본값 -----------------
 -- 유니크(MELEE/GUN/GEAR)는 기본 1. 스택형만 카테고리별 상한을 준다. 초과분은 새 스택으로 분리.
 UPDATE item_template SET max_stack = 60 WHERE category = 'AMMO';
 UPDATE item_template SET max_stack = 10 WHERE category = 'FOOD';
 UPDATE item_template SET max_stack = 5  WHERE category = 'MEDICAL';
+
+-- ---- 스프라이트 매핑: 아이템마다 전용 스프라이트 1장(icon = code) ------------------
+-- tools/gen-sprites.mjs 가 code.svg 를 생성한다. 위 시드의 공유 icon 값은 여기서 무효화된다.
+UPDATE item_template SET icon = code;
 
 -- ============================================================================
 --  시드: 개발용 플레이어 3명 + 지갑 + 초기 인벤토리

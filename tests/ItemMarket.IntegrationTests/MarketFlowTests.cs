@@ -31,13 +31,14 @@ public class MarketFlowTests(MarketAppFixture f)
     }
 
     [Fact]
-    public async Task Catalog_returns_106_templates()
+    public async Task Catalog_returns_149_templates()
     {
         var c = await _f.AuthedAs(Alpha);
         var res = await Api<List<ItemTemplateDto>>(await c.GetAsync("/api/catalog"));
         Assert.True(res.Success);
-        // 아이템 마스터 102종 + 장비(GEAR) 4종(헬멧/방탄조끼/리그/백팩, id 103~106) = 106.
-        Assert.Equal(106, res.Data!.Count);
+        // 아이템 마스터 132종(FOOD/MEDICAL/MELEE/GUN/AMMO) + 장비(GEAR) 17종
+        // (헬멧/방어구/리그/백팩 티어, id 103~106 + 133~149) = 149.
+        Assert.Equal(149, res.Data!.Count);
     }
 
     // 머니샷: 매도 대기 → 매칭 매수 → 원자 정산(대금·아이템·수수료 sink)
