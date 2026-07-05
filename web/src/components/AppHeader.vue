@@ -23,6 +23,7 @@ const navItems = computed(() => {
     { name: 'market', label: 'Market' },
     { name: 'inventory', label: 'Stash' },
     { name: 'stash', label: 'Grid' },
+    { name: 'loadout', label: '장비' },
     { name: 'wallet', label: 'Wallet' },
     { name: 'orders', label: 'Orders' },
   ]
