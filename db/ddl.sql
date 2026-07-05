@@ -72,9 +72,10 @@ CREATE TABLE inventory_stack (
 CREATE TABLE item_instance (
     id              UUID PRIMARY KEY,
     template_id     INT  NOT NULL REFERENCES item_template(id),
-    owner_player_id UUID REFERENCES player(id),   -- NULL = 에스크로/이동중
+    owner_player_id UUID REFERENCES player(id),   -- NULL = 에스크로/이동중/레이드 소실(tombstone)
     durability      INT,
     attachments     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    origin          TEXT NOT NULL DEFAULT 'SEED',  -- 프로버넌스: SEED/ADMIN_GRANT/RAID/RAID_LOST 등
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_item_instance_owner ON item_instance(owner_player_id);
@@ -179,6 +180,60 @@ CREATE TABLE refresh_token (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_refresh_token_player ON refresh_token(player_id);
+
+-- ----------------------------------------------------------------------------
+-- 익스트랙션 레이드 세션 (extraction/raid)
+--   생존형(extraction) 게임의 시그니처 루프를 서비스 계층 상태기계 + 원자적 정산으로 모델링.
+--   루프: LOADOUT을 채운다 → StartRaid(로드아웃을 "위험(at-risk)"으로 잠금) →
+--         Extract(생존 → 전량 스태시로 회수) | Die(위험 아이템 소실).
+--   설계: 매도 에스크로와 동일한 "자산 잠금" 이동을 재사용한다.
+--     - StartRaid: 로드아웃 스택은 inventory_stack에서 차감, 유니크는 owner_player_id=NULL.
+--       (판매/이동 불가 상태가 되어 레이드 중 이중사용/dupe 원천 차단 — 기존 에스크로 검사가 거부).
+--     - 위험 스냅샷은 raid_session_item(레이드 에스크로)에 보관.
+--     - 플레이어당 ACTIVE 세션은 최대 1개(부분 유니크 인덱스로 강제).
+-- ----------------------------------------------------------------------------
+CREATE TABLE raid_session (
+    id          UUID PRIMARY KEY,
+    player_id   UUID NOT NULL REFERENCES player(id),
+    status      TEXT NOT NULL,   -- ACTIVE / EXTRACTED / DIED
+    started_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at TIMESTAMPTZ      -- EXTRACTED/DIED 확정 시각(ACTIVE면 NULL)
+);
+-- 플레이어당 ACTIVE 세션 1개 강제(부분 유니크 인덱스). 두 번째 StartRaid는 여기서 충돌.
+CREATE UNIQUE INDEX uq_raid_active ON raid_session(player_id) WHERE status = 'ACTIVE';
+CREATE INDEX idx_raid_session_player ON raid_session(player_id, started_at DESC);
+
+-- 위험(at-risk) 아이템 스냅샷 = "레이드 에스크로". BROUGHT(반입) + LOOTED(레이드 중 획득).
+--   유니크 LOOTED는 Extract 시점에야 item_instance로 materialize되므로 instance_id는
+--   item_instance를 FK 참조하지 않는다(반입 유니크는 이미 존재하는 인스턴스의 id를 담음).
+CREATE TABLE raid_session_item (
+    id          BIGSERIAL PRIMARY KEY,
+    session_id  UUID NOT NULL REFERENCES raid_session(id),
+    kind        TEXT NOT NULL,   -- STACK / INSTANCE
+    template_id INT  NOT NULL REFERENCES item_template(id),
+    instance_id UUID,            -- INSTANCE일 때만(반입=기존 id, 획득=예약 id → Extract 시 materialize)
+    quantity    INT  NOT NULL DEFAULT 1 CHECK (quantity >= 1),  -- 유니크는 1
+    source      TEXT NOT NULL,   -- BROUGHT / LOOTED
+    CHECK ((kind = 'INSTANCE') = (instance_id IS NOT NULL))
+);
+CREATE INDEX idx_raid_item_session ON raid_session_item(session_id);
+
+-- 아이템 원장(append-only). wallet_ledger의 프로버넌스 아이디어를 아이템 이동에 적용.
+--   레이드 흐름(RAID_BROUGHT/RAID_EXTRACT/RAID_LOOT/RAID_LOSS)을 최소 기록한다(감사/dupe 탐지).
+--   delta_qty는 소유 인벤토리 기준 부호(반입/소실=-, 회수/획득=+). 잔고 컬럼은 없다(잔고가 아닌
+--   이동 로그). ref_id는 관련 raid_session id.
+CREATE TABLE item_ledger (
+    id          BIGSERIAL PRIMARY KEY,
+    player_id   UUID NOT NULL REFERENCES player(id),
+    kind        TEXT NOT NULL,   -- STACK / INSTANCE
+    template_id INT  NOT NULL REFERENCES item_template(id),
+    instance_id UUID,
+    delta_qty   INT  NOT NULL,
+    reason      TEXT NOT NULL,   -- RAID_BROUGHT/RAID_EXTRACT/RAID_LOOT/RAID_LOSS/ADMIN_GRANT/TRADE...
+    ref_id      UUID,            -- 관련 raid_session id 등
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_item_ledger_player ON item_ledger(player_id, created_at DESC);
 
 -- ============================================================================
 --  시드: 아이템 마스터 102종
@@ -319,12 +374,19 @@ UPDATE item_template SET grid_w = 4, grid_h = 2
 INSERT INTO player(id, display_name) VALUES
   ('11111111-1111-1111-1111-111111111111', 'Survivor_Alpha'),
   ('22222222-2222-2222-2222-222222222222', 'Survivor_Bravo'),
-  ('33333333-3333-3333-3333-333333333333', 'Trader_Charlie');
+  ('33333333-3333-3333-3333-333333333333', 'Trader_Charlie'),
+  -- 레이드(익스트랙션) 데모/테스트 전용. 시작 인벤토리는 비어 있음(테스트가 필요분을 지급).
+  ('44444444-4444-4444-4444-444444444444', 'Raider_Delta'),
+  ('55555555-5555-5555-5555-555555555555', 'Raider_Echo'),
+  ('66666666-6666-6666-6666-666666666666', 'Raider_Foxtrot');
 
 INSERT INTO wallet(player_id, balance) VALUES
   ('11111111-1111-1111-1111-111111111111', 10000),
   ('22222222-2222-2222-2222-222222222222', 10000),
-  ('33333333-3333-3333-3333-333333333333', 50000);
+  ('33333333-3333-3333-3333-333333333333', 50000),
+  ('44444444-4444-4444-4444-444444444444', 10000),
+  ('55555555-5555-5555-5555-555555555555', 10000),
+  ('66666666-6666-6666-6666-666666666666', 10000);
 
 -- Alpha: 스택형 재고(먹을거/힐템/탄약)
 INSERT INTO inventory_stack(player_id, template_id, quantity) VALUES
