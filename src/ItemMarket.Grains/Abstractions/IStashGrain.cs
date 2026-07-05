@@ -12,6 +12,9 @@ public interface IStashGrain : IGrainWithGuidKey
     /// <summary>지정 컨테이너의 배치 스냅샷. 미배치 소유 아이템은 first-fit으로 STASH에 자동 배치·영속화한다.</summary>
     Task<StashDto> GetStash(GridContainer container);
 
+    /// <summary>장착된 백팩/리그의 내부(중첩) 그리드 스냅샷. 장착된 컨테이너가 아니면 PlacementInvalid.</summary>
+    Task<StashDto> GetContainer(Guid containerInstanceId);
+
     /// <summary>
     /// 아이템 이동. FromContainer==ToContainer면 같은 컨테이너 재배치,
     /// 다르면 컨테이너 간 이동(반입/반출). 소유권/경계/겹침 검증 후 영속화. 위반 시 PlacementInvalid.
