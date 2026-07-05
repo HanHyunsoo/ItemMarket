@@ -67,6 +67,11 @@
 | GET | `/api/orders` | - | `OrderDto[]` (내 주문) |
 | GET | `/api/orders/{id}` | - | `OrderDto` |
 | DELETE | `/api/orders/{id}` | - | `OrderDto` (취소, 에스크로 환불) |
+| GET | `/api/raid` | - | `RaidSessionDto?` (현재/최근 세션, 이력 없으면 `null`) |
+| POST | `/api/raid/start` | - | `RaidSessionDto` (로드아웃을 위험으로 잠금, ACTIVE) |
+| POST | `/api/raid/loot` | `AddLootRequest` | `RaidSessionDto` (전리품 추가) |
+| POST | `/api/raid/extract` | - | `RaidSessionDto` (생존 → 전량 소유 복귀, EXTRACTED) |
+| POST | `/api/raid/die` | - | `RaidSessionDto` (위험 아이템 소실, DIED) |
 
 ## 운영(어드민) 엔드포인트
 
@@ -128,6 +133,33 @@
   - 필드(`FromContainer`/`ToContainer`/`Quantity`)는 모두 선택적이며 기본값은 STASH/STASH/전체라,
     기존 단일-스태시 이동 호출과 호환된다.
 
+## 익스트랙션 레이드 (`/api/raid/*`)
+
+생존형(extraction) 게임의 시그니처 루프를 **서비스 계층 세션 상태기계 + 원자적 정산**으로
+모델링한다. 게임플레이 틱/전투는 범위 밖 — 이 백엔드는 게임 서버가 호출하는 서비스이며
+`extract`/`die`는 명시적 엔드포인트다(실제 통합에서는 게임 서버가 결과를 알린다).
+
+- **루프**: 플레이어가 **LOADOUT**을 채운다(기존 `POST /api/stash/move`) → **StartRaid** 로 로드아웃을
+  "위험(at-risk)"으로 잠근다 → **Extract**(생존, 전량 STASH로 회수) 또는 **Die**(위험 아이템 소실).
+- **상태기계**: `(없음) --start--> ACTIVE --extract--> EXTRACTED` / `ACTIVE --die--> DIED`.
+  `RaidSessionDto.Status`(`Active`\|`Extracted`\|`Died`, PascalCase 직렬화).
+- **플레이어당 ACTIVE 세션 1개**: 진행 중 다시 `start`하면 `RaidActive`(**409**). DB의 부분 유니크
+  인덱스(`WHERE status='ACTIVE'`)가 최종 강제. `extract`/`die`/`loot`에 ACTIVE 세션이 없으면 `RaidNotFound`(**404**).
+- **StartRaid(원자적, 매도 에스크로와 동일한 자산 잠금 재사용)**: 로드아웃 스택은 `inventory_stack`에서
+  차감, 유니크는 `item_instance.owner_player_id = NULL`. 로드아웃 배치를 비우고 위험 스냅샷
+  `raid_session_item`(source=`BROUGHT`)에 기록한다. 위험 아이템은 인벤에서 사라지므로 **레이드 중
+  판매/이동/배치가 자동 거부**된다(기존 에스크로 검사가 그대로 거른다).
+- **AddLoot(MVP 시뮬레이션)**: ACTIVE 세션에 `LOOTED` 위험 아이템을 추가한다. 스택은 수량 스냅샷,
+  유니크는 `item_instance`를 `owner=NULL`·`origin='RAID'`로 즉시 생성(위험 상태)한다. 소유는 Extract 시 부여.
+  `AddLootRequest`: `Kind`(`Stack`\|`Instance`), `TemplateId`, `Quantity`(스택 필수), `Durability`/`Attachments`(유니크 선택).
+- **Extract = 보존**: 반입(`BROUGHT`) + 획득(`LOOTED`) 전량을 소유로 복귀(스택 가산 / 유니크 owner 복원).
+  복귀분은 **소유** 상태라 다음 `GET /api/stash`에서 STASH로 자동 배치된다. 총량 보존.
+- **Die = 로드아웃만 소실**: 위험 아이템 전량 소각(스택 미복귀 / 유니크 tombstone: `owner=NULL`,
+  `origin='RAID_LOST'`). **STASH(안전)는 무관**. 손실은 `item_ledger`(`RAID_LOSS`)에 회계된다.
+- **아이템 원장(`item_ledger`, append-only)**: 레이드 이동을 프로버넌스로 기록한다 —
+  `RAID_BROUGHT`(반입, -), `RAID_EXTRACT`(회수, +), `RAID_LOOT`(획득 materialize, +), `RAID_LOSS`(소실, -).
+  `wallet_ledger`의 감사 패턴을 아이템에 적용한 것(잔고 컬럼 없는 이동 로그, `ref_id`=세션 id).
+
 ## 멱등성 (`POST /api/orders`)
 
 재시도/중복 제출(네트워크 재전송, 더블클릭)로 주문이 두 번 등록되는 것을 막는다.
@@ -155,4 +187,4 @@
 `ValidationError` · `PlayerNotFound` · `TemplateNotFound` · `InstanceNotFound` ·
 `InstanceNotOwned` · `InsufficientFunds` · `InsufficientQuantity` · `OrderNotFound` ·
 `OrderNotOwned` · `OrderAlreadyClosed` · `StackableMismatch` · `PlacementInvalid` ·
-`RateLimited`(429) · `IdempotencyInProgress`(409)
+`RateLimited`(429) · `IdempotencyInProgress`(409) · `RaidActive`(409) · `RaidNotFound`(404)

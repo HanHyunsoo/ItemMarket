@@ -22,6 +22,10 @@ public sealed class MarketAppFixture : IAsyncLifetime
     public static readonly Guid Alpha = Guid.Parse("11111111-1111-1111-1111-111111111111");
     public static readonly Guid Bravo = Guid.Parse("22222222-2222-2222-2222-222222222222");
     public static readonly Guid Charlie = Guid.Parse("33333333-3333-3333-3333-333333333333"); // admin
+    // 레이드(익스트랙션) 전용 시드 플레이어 — 시작 인벤 비어있음(테스트 격리용).
+    public static readonly Guid Delta = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    public static readonly Guid Echo = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    public static readonly Guid Foxtrot = Guid.Parse("66666666-6666-6666-6666-666666666666");
 
     public static readonly JsonSerializerOptions Json = new()
     {
@@ -38,6 +42,9 @@ public sealed class MarketAppFixture : IAsyncLifetime
         .Build();
 
     private WebApplicationFactory<Program> _app = default!;
+
+    /// <summary>일회용 Postgres 연결 문자열(테스트에서 item_ledger 등 직접 검증용).</summary>
+    public string ConnString => _pg.GetConnectionString();
 
     public async Task InitializeAsync()
     {
