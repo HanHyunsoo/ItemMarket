@@ -1,3 +1,4 @@
+using ItemMarket.Contracts.Equipment;
 using ItemMarket.Contracts.Orders;
 using ItemMarket.Contracts.Raid;
 using ItemMarket.Contracts.Stash;
@@ -16,7 +17,11 @@ public sealed record StashPlacementRow(
     Guid? InstanceId,
     int X,
     int Y,
-    int Quantity);
+    int Quantity,
+    Guid? ContainerInstanceId = null);
+
+/// <summary>장착 슬롯 한 줄(player_equipment). 슬롯 → 인스턴스(+템플릿).</summary>
+public sealed record EquipmentSlotRow(EquipSlot Slot, Guid InstanceId, int TemplateId);
 
 /// <summary>매칭에 필요한 아이템 템플릿 속성.</summary>
 public sealed record TemplateRow(int Id, bool Stackable);

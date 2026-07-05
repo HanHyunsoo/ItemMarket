@@ -1,13 +1,15 @@
 namespace ItemMarket.Contracts.Items;
 
-/// <summary>아이템 카테고리. FOOD/MEDICAL/AMMO=스택형, MELEE/GUN=유니크 인스턴스.</summary>
+/// <summary>아이템 카테고리. FOOD/MEDICAL/AMMO=스택형, MELEE/GUN/GEAR=유니크 인스턴스.
+/// GEAR=장비(헬멧/방어구/백팩/리그).</summary>
 public enum ItemCategory
 {
     Food,
     Medical,
     Melee,
     Gun,
-    Ammo
+    Ammo,
+    Gear
 }
 
 /// <summary>희귀도. 아포칼립스 세계관상 총(GUN)은 대체로 Rare 이상.</summary>
@@ -35,7 +37,11 @@ public sealed record ItemTemplateDto(
     string Icon,
     long BaseValue,
     int GridW = 1,
-    int GridH = 1);
+    int GridH = 1,
+    Equipment.EquipSlot? EquipSlot = null,
+    bool IsContainer = false,
+    int? ContainerW = null,
+    int? ContainerH = null);
 
 /// <summary>유니크 인스턴스(무기/방어구). 내구도·부착물 보유.</summary>
 public sealed record ItemInstanceDto(
