@@ -166,7 +166,7 @@ const empty = computed(() => !loadingRaids.value && raids.value.length === 0)
           <p class="raid-note mono" :class="r.status === 'Extracted' ? 'ok' : 'bad'">
             {{
               r.status === 'Extracted'
-                ? 'Extracted — gear restored to its loadout / equipment spots; loot recovered.'
+                ? 'Extracted — gear restored to its equipment / pockets / backpack spots; loot recovered.'
                 : 'Killed in action — brought & looted items were lost.'
             }}
           </p>

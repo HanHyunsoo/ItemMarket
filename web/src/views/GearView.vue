@@ -19,14 +19,14 @@ import type {
 } from '@/api/types'
 
 // Unified Tarkov-style screen: stash grid on the left, character equipment on the
-// right (doll slots + nested backpack/rig grids) plus the carry Loadout grid.
-// Equip = drag a compatible instance onto a slot. Items flow between stash /
-// loadout / nested grids via drag (server-authoritative /api/stash/move).
+// right (doll slots + innate pockets + nested backpack/rig grids). Equip = drag a
+// compatible instance onto a slot. Items flow between stash / pockets / nested grids
+// via drag (server-authoritative /api/stash/move).
 const catalog = useCatalogStore()
 const { activeDrag } = useGridDnd()
 
 const stash = ref<StashDto | null>(null)
-const loadout = ref<StashDto | null>(null)
+const pockets = ref<StashDto | null>(null)
 const equipment = ref<EquipmentDto | null>(null)
 const inventory = ref<InventoryDto | null>(null)
 
@@ -71,14 +71,14 @@ const backpack = computed(
 
 // ---- data ----
 async function refreshAll(): Promise<void> {
-  const [s, l, e, inv] = await Promise.all([
+  const [s, p, e, inv] = await Promise.all([
     stashApi.get('Stash'),
-    stashApi.get('Loadout'),
+    stashApi.get('Pockets'),
     equipmentApi.get(),
     inventoryApi.get(),
   ])
   stash.value = s
-  loadout.value = l
+  pockets.value = p
   equipment.value = e
   inventory.value = inv
 }
@@ -156,14 +156,14 @@ async function onSlotDrop(slot: EquipSlot): Promise<void> {
   try {
     equipment.value = await equipmentApi.equip({ slot, instanceId: p.instanceId })
     toastSuccess('Equipped.')
-    // The instance left its grid — refetch stash/loadout/inventory to reconcile.
-    const [s, l, inv] = await Promise.all([
+    // The instance left its grid — refetch stash/pockets/inventory to reconcile.
+    const [s, pk, inv] = await Promise.all([
       stashApi.get('Stash'),
-      stashApi.get('Loadout'),
+      stashApi.get('Pockets'),
       inventoryApi.get(),
     ])
     stash.value = s
-    loadout.value = l
+    pockets.value = pk
     inventory.value = inv
   } catch (err) {
     // SlotMismatch (or occupied slot) — nothing moved; just surface it.
@@ -226,18 +226,18 @@ function inspectSlot(slot: EquipSlot): void {
   <div v-loading="loading || busy">
     <h1 class="wx-page-title">장비 · Gear</h1>
     <p class="wx-page-sub">
-      Drag items between stash, loadout and your rig/backpack — drag a compatible item onto a slot to
-      equip. The server validates every placement.
+      Drag items between stash, pockets and your rig/backpack — drag a compatible item onto a
+      slot to equip. The server validates every placement.
     </p>
 
-    <div v-if="stash && loadout && equipment" class="layout">
+    <div v-if="stash && pockets && equipment" class="layout">
       <!-- LEFT: stash -->
       <section class="wx-panel col-stash">
         <div class="grid-head">
           <span class="grid-label">Stash · 창고</span>
           <span class="grid-cap mono">{{ stash.gridW }}×{{ stash.gridH }}</span>
         </div>
-        <div class="grid-scroll">
+        <div class="grid-scroll stash-scroll">
           <ItemGrid :stash="stash" :busy="busy" @move="onMove" @inspect="inspectPlacement" />
         </div>
       </section>
@@ -247,7 +247,7 @@ function inspectSlot(slot: EquipSlot): void {
         <!-- doll slots -->
         <div class="wx-panel doll">
           <div class="grid-head">
-            <span class="grid-label loadout">Equipment · 착용</span>
+            <span class="grid-label accent">Equipment · 착용</span>
           </div>
           <div class="slots">
             <div
@@ -280,10 +280,24 @@ function inspectSlot(slot: EquipSlot): void {
           </div>
         </div>
 
+        <!-- innate pockets grid (always present, always at-risk in a raid) -->
+        <div class="wx-panel">
+          <div class="grid-head">
+            <span class="grid-label accent">Pockets · 주머니</span>
+            <span class="grid-cap mono">{{ pockets.gridW }}×{{ pockets.gridH }}</span>
+          </div>
+          <p class="slot-empty-note mono">
+            Small innate storage — always with you, always at risk in a raid.
+          </p>
+          <div class="grid-scroll">
+            <ItemGrid :stash="pockets" :busy="busy" @move="onMove" @inspect="inspectPlacement" />
+          </div>
+        </div>
+
         <!-- rig nested grid -->
         <div class="wx-panel">
           <div class="grid-head">
-            <span class="grid-label loadout">Rig · 리그</span>
+            <span class="grid-label accent">Rig · 리그</span>
             <span v-if="rig" class="grid-cap mono">{{ rig.gridW }}×{{ rig.gridH }}</span>
           </div>
           <div v-if="rig" class="grid-scroll">
@@ -302,7 +316,7 @@ function inspectSlot(slot: EquipSlot): void {
         <!-- backpack nested grid -->
         <div class="wx-panel">
           <div class="grid-head">
-            <span class="grid-label loadout">Backpack · 배낭</span>
+            <span class="grid-label accent">Backpack · 배낭</span>
             <span v-if="backpack" class="grid-cap mono"
               >{{ backpack.gridW }}×{{ backpack.gridH }}</span
             >
@@ -321,23 +335,10 @@ function inspectSlot(slot: EquipSlot): void {
             No backpack equipped — drag one onto the Backpack slot.
           </p>
         </div>
-
-        <!-- carry loadout grid -->
-        <div class="wx-panel">
-          <div class="grid-head">
-            <span class="grid-label loadout">Loadout · 반입 ({{ loadout.gridW }}×{{
-              loadout.gridH
-            }})</span>
-          </div>
-          <p class="slot-empty-note mono">The carry grid you deploy into raids with.</p>
-          <div class="grid-scroll">
-            <ItemGrid :stash="loadout" :busy="busy" @move="onMove" @inspect="inspectPlacement" />
-          </div>
-        </div>
       </section>
     </div>
 
-    <div v-if="!loading && !(stash && loadout && equipment)" class="wx-empty">
+    <div v-if="!loading && !(stash && pockets && equipment)" class="wx-empty">
       <img class="pixel" src="/sprites/ammo_box.svg" alt="" />
       Gear unavailable. Is the exchange online?
     </div>
@@ -375,6 +376,12 @@ function inspectSlot(slot: EquipSlot): void {
   max-width: 100%;
   overflow-x: auto;
 }
+/* Stash height is server-driven (12×GridH, GridH can be large) — cap and scroll
+   vertically instead of rendering an unbounded column of cells. */
+.stash-scroll {
+  max-height: 78vh;
+  overflow-y: auto;
+}
 .grid-head {
   display: flex;
   align-items: baseline;
@@ -389,7 +396,7 @@ function inspectSlot(slot: EquipSlot): void {
   text-transform: uppercase;
   color: var(--wx-amber-bright);
 }
-.grid-label.loadout {
+.grid-label.accent {
   color: var(--wx-olive);
 }
 .grid-cap {

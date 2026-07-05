@@ -3,14 +3,23 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useCatalogStore } from '@/stores/catalog'
-import { raidApi, stashApi } from '@/api/endpoints'
+import { equipmentApi, raidApi, stashApi } from '@/api/endpoints'
 import { notifyWalletChanged } from '@/realtime/marketHub'
 import ItemGrid from '@/components/ItemGrid.vue'
+import ItemSprite from '@/components/ItemSprite.vue'
 import RaidItemRow from '@/components/RaidItemRow.vue'
 import { dateTime, shortId } from '@/utils/format'
 import { toastError, toastSuccess } from '@/utils/toast'
 import { ApiClientError } from '@/api/client'
-import type { RaidSessionDto, StashDto } from '@/api/types'
+import type { EquipSlot, EquipmentDto, NestedContainerDto, RaidSessionDto, StashDto } from '@/api/types'
+
+const SLOT_LABEL: Record<EquipSlot, string> = {
+  Helmet: 'Helmet · 헬멧',
+  Armor: 'Armor · 방어구',
+  Weapon: 'Weapon · 무기',
+  Backpack: 'Backpack · 배낭',
+  Rig: 'Rig · 리그',
+}
 
 const catalog = useCatalogStore()
 const router = useRouter()
@@ -20,7 +29,12 @@ const router = useRouter()
 // longer returns it via GET, so we keep it locally until the user returns.
 const raid = ref<RaidSessionDto | null>(null)
 const outcome = ref<RaidSessionDto | null>(null)
-const loadout = ref<StashDto | null>(null)
+
+// What gets brought in: everything outside the Stash — equipped gear, the innate
+// pockets, and the contents of any equipped backpack/rig. The old separate Loadout
+// container no longer exists; equipment alone is enough to deploy with.
+const equipment = ref<EquipmentDto | null>(null)
+const pockets = ref<StashDto | null>(null)
 
 const loading = ref(false)
 const deploying = ref(false)
@@ -38,11 +52,31 @@ const mode = computed<'prep' | 'active' | 'outcome'>(() => {
   return 'prep'
 })
 
-const loadoutEmpty = computed(
+const equippedSlots = computed(() => equipment.value?.slots ?? [])
+const rig = computed(() => equipment.value?.containers.find((c) => c.slot === 'Rig') ?? null)
+const backpack = computed(
+  () => equipment.value?.containers.find((c) => c.slot === 'Backpack') ?? null,
+)
+function nestedStash(c: NestedContainerDto): StashDto {
+  return {
+    playerId: equipment.value?.playerId ?? '',
+    container: 'Container',
+    gridW: c.gridW,
+    gridH: c.gridH,
+    placements: c.placements,
+    unplaced: [],
+  }
+}
+
+// Purely informational — nothing gates the deploy button. Equipment alone (with
+// empty pockets and no backpack/rig) is a perfectly valid state to deploy with.
+const bringingNothing = computed(
   () =>
-    !!loadout.value &&
-    loadout.value.placements.length === 0 &&
-    loadout.value.unplaced.length === 0,
+    equippedSlots.value.length === 0 &&
+    !!pockets.value &&
+    pockets.value.placements.length === 0 &&
+    !rig.value &&
+    !backpack.value,
 )
 
 const broughtItems = computed(() => raid.value?.items.filter((i) => i.source === 'Brought') ?? [])
@@ -55,15 +89,17 @@ function tplName(id: number): string {
   return catalog.get(id)?.name ?? `#${id}`
 }
 
-async function loadLoadout(): Promise<void> {
-  loadout.value = await stashApi.get('Loadout')
+async function loadDeployPreview(): Promise<void> {
+  const [e, p] = await Promise.all([equipmentApi.get(), stashApi.get('Pockets')])
+  equipment.value = e
+  pockets.value = p
 }
 
 onMounted(async () => {
   loading.value = true
   try {
     await catalog.ensureLoaded()
-    const [r] = await Promise.all([raidApi.get(), loadLoadout()])
+    const [r] = await Promise.all([raidApi.get(), loadDeployPreview()])
     raid.value = r
   } catch (err) {
     toastError(err, 'Could not reach the raid controller.')
@@ -103,12 +139,12 @@ async function onLoot(): Promise<void> {
 }
 
 // Shared post-resolve refresh: header caps chip (via wallet fan-out) plus the
-// prep-screen loadout, which the server has now emptied. Inventory/Stash views
-// re-fetch on their own navigation.
+// prep-screen deploy preview, which the server has now restored/emptied. Inventory/
+// Stash views re-fetch on their own navigation.
 async function afterResolve(): Promise<void> {
   notifyWalletChanged()
   try {
-    await loadLoadout()
+    await loadDeployPreview()
   } catch {
     /* non-fatal — prep screen will retry on return */
   }
@@ -162,7 +198,7 @@ async function onReturn(): Promise<void> {
   raid.value = null
   loading.value = true
   try {
-    const [r] = await Promise.all([raidApi.get(), loadLoadout()])
+    const [r] = await Promise.all([raidApi.get(), loadDeployPreview()])
     raid.value = r
   } catch (err) {
     toastError(err, 'Could not reload the staging area.')
@@ -171,8 +207,8 @@ async function onReturn(): Promise<void> {
   }
 }
 
-function goLoadout(): void {
-  router.push({ name: 'loadout' })
+function goGear(): void {
+  router.push({ name: 'gear' })
 }
 </script>
 
@@ -180,33 +216,67 @@ function goLoadout(): void {
   <div v-loading="loading">
     <h1 class="wx-page-title">출격 · Extraction Raid</h1>
     <p class="wx-page-sub">
-      장비(Loadout)를 챙겨 출격 — 획득하고, 탈출하면 귀속, 사망하면 소실. High risk, high reward.
+      착용 장비 + 주머니(+백팩/리그 내용물)를 챙겨 출격 — 획득하고, 탈출하면 귀속, 사망하면 소실. High
+      risk, high reward.
     </p>
 
     <!-- ============ PREP: no active raid ============ -->
-    <div v-if="mode === 'prep' && loadout" class="stage">
-      <section class="wx-panel prep-loadout">
+    <div v-if="mode === 'prep' && pockets" class="stage">
+      <section class="wx-panel prep-preview">
         <div class="panel-head">
-          <span class="wx-section-title">반입 장비 · Loadout</span>
-          <span class="grid-cap mono">{{ loadout.gridW }}×{{ loadout.gridH }}</span>
+          <span class="wx-section-title">반입 프리뷰 · At Risk</span>
+        </div>
+        <p class="hint mono">
+          착용 장비 + 주머니(+백팩/리그 내용물)가 그대로 반입됩니다. 배치를 바꾸려면
+          <a class="link" @click="goGear">장비 화면</a>에서 조정하세요.
+        </p>
+
+        <div v-if="bringingNothing" class="wx-empty">
+          <img class="pixel" src="/sprites/ammo_box.svg" alt="" />
+          맨몸 출격 — 착용 장비도, 주머니 내용물도 없습니다. 그래도 출격은 가능합니다.
         </div>
 
-        <template v-if="loadoutEmpty">
-          <div class="wx-empty">
-            <img class="pixel" src="/sprites/ammo_box.svg" alt="" />
-            장비가 비어 있습니다. 출격하려면 먼저 장비를 채우세요.
-          </div>
-          <el-button class="w-full" @click="goLoadout">장비 꾸리기 →</el-button>
-        </template>
-
         <template v-else>
-          <p class="hint mono">
-            이 장비가 그대로 반입됩니다. 배치를 바꾸려면
-            <a class="link" @click="goLoadout">장비 화면</a>에서 조정하세요.
-          </p>
-          <div class="grid-scroll">
-            <ItemGrid :stash="loadout" :busy="true" :show-tray="true" />
+          <div v-if="equippedSlots.length" class="equip-summary">
+            <div v-for="s in equippedSlots" :key="s.slot" class="equip-chip" :title="SLOT_LABEL[s.slot]">
+              <ItemSprite
+                :icon="catalog.get(s.templateId)?.icon"
+                :category="catalog.get(s.templateId)?.category"
+                :rarity="catalog.get(s.templateId)?.rarity"
+                :size="34"
+              />
+              <span class="equip-chip-name mono">{{ SLOT_LABEL[s.slot] }}</span>
+            </div>
           </div>
+          <p v-else class="empty-line mono">착용한 장비가 없습니다.</p>
+
+          <div class="grid-head">
+            <span class="grid-label">Pockets · 주머니</span>
+            <span class="grid-cap mono">{{ pockets.gridW }}×{{ pockets.gridH }}</span>
+          </div>
+          <div class="grid-scroll">
+            <ItemGrid :stash="pockets" :busy="true" :show-tray="true" />
+          </div>
+
+          <template v-if="rig">
+            <div class="grid-head">
+              <span class="grid-label">Rig · 리그</span>
+              <span class="grid-cap mono">{{ rig.gridW }}×{{ rig.gridH }}</span>
+            </div>
+            <div class="grid-scroll">
+              <ItemGrid :stash="nestedStash(rig)" :busy="true" :show-tray="false" />
+            </div>
+          </template>
+
+          <template v-if="backpack">
+            <div class="grid-head">
+              <span class="grid-label">Backpack · 배낭</span>
+              <span class="grid-cap mono">{{ backpack.gridW }}×{{ backpack.gridH }}</span>
+            </div>
+            <div class="grid-scroll">
+              <ItemGrid :stash="nestedStash(backpack)" :busy="true" :show-tray="false" />
+            </div>
+          </template>
         </template>
       </section>
 
@@ -215,10 +285,11 @@ function goLoadout(): void {
           <span class="wx-section-title">출격 브리핑</span>
           <ul class="brief-list">
             <li>
-              <span class="wx-buy">탈출(Extract)</span> — 반입 장비는 원래 자리(장비/로드아웃)로 복귀,
-              획득 전리품은 회수
+              <span class="wx-buy">탈출(Extract)</span> — 반입 장비는 원래 자리(장비/주머니/백팩·리그)로
+              복귀, 획득 전리품은 회수
             </li>
             <li><span class="wx-sell">사망(Die)</span> — 반입 + 획득 아이템 전부 소실 (창고는 안전)</li>
+            <li>착용 장비만으로도 출격할 수 있습니다 — 주머니가 비어 있어도 무방합니다.</li>
           </ul>
         </div>
         <el-button
@@ -226,14 +297,10 @@ function goLoadout(): void {
           size="large"
           class="deploy-btn"
           :loading="deploying"
-          :disabled="loadoutEmpty"
           @click="onDeploy"
         >
           출격 · DEPLOY
         </el-button>
-        <p v-if="loadoutEmpty" class="deploy-note mono wx-muted">
-          장비를 채워야 출격할 수 있습니다.
-        </p>
       </aside>
     </div>
 
@@ -357,7 +424,8 @@ function goLoadout(): void {
         </div>
 
         <p v-if="outcome.status === 'Extracted'" class="outcome-note mono">
-          반입 장비는 <strong>원래 자리(장비·로드아웃)</strong>로 복귀했고, 전리품은 회수되었습니다.
+          반입 장비는 <strong>원래 자리(장비·주머니·백팩/리그)</strong>로 복귀했고, 전리품은
+          회수되었습니다.
         </p>
         <p v-else class="outcome-note mono">창고(Stash)의 아이템은 안전합니다.</p>
 
@@ -365,7 +433,7 @@ function goLoadout(): void {
       </section>
     </div>
 
-    <div v-if="!loading && mode === 'prep' && !loadout" class="wx-empty">
+    <div v-if="!loading && mode === 'prep' && !pockets" class="wx-empty">
       <img class="pixel" src="/sprites/ammo_box.svg" alt="" />
       Raid staging unavailable. Is the backend online?
     </div>
@@ -419,6 +487,42 @@ function goLoadout(): void {
 .w-full {
   width: 100%;
   margin-top: 12px;
+}
+.grid-label {
+  font-family: var(--wx-font-display);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--wx-amber-bright);
+}
+.grid-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 16px 0 10px;
+}
+
+/* ---- deploy preview: equipped gear summary ---- */
+.equip-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.equip-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--wx-border-strong);
+  border-radius: var(--wx-r-sm);
+  background: var(--wx-inset);
+}
+.equip-chip-name {
+  font-size: 11px;
+  color: var(--wx-text-dim);
+  letter-spacing: 0.5px;
 }
 
 /* ---- deploy panel ---- */

@@ -97,6 +97,10 @@ export interface ItemTemplateDto {
   isContainer: boolean
   containerW?: number | null
   containerH?: number | null
+  // Max quantity per stack (category default: Ammo 60 / Food 10 / Medical 5, unique = 1).
+  // A stackable template's quantity can exceed this — it just spans multiple stacks
+  // (multiple grid placements), each capped at maxStack.
+  maxStack: number
 }
 
 export interface ItemInstanceDto {
@@ -121,10 +125,13 @@ export interface InventoryDto {
 // ---- Stash (spatial grid inventory) ----
 // A placement occupies a w×h footprint at top-left cell (x, y).
 export type StashItemKind = 'Stack' | 'Instance'
-// Which grid a placement lives in. STASH is 10×12, LOADOUT is 6×8, CONTAINER is
-// the nested grid of an equipped backpack/rig (addressed by containerInstanceId).
-// Serialized PascalCase; the stash GET route segment is the lowercase form.
-export type GridContainer = 'Stash' | 'Loadout' | 'Container'
+// Which grid a placement lives in. STASH is 12 wide × variable height (StashDto.GridH,
+// backed by player.stash_rows) and never at-risk in a raid. POCKETS is an innate 4×1
+// container that's always present and travels with the player into a raid (like
+// equipped gear). CONTAINER is the nested grid of an equipped backpack/rig (addressed
+// by containerInstanceId). Serialized PascalCase; the stash GET route segment is the
+// lowercase form (e.g. /api/stash/pockets).
+export type GridContainer = 'Stash' | 'Pockets' | 'Container'
 
 export interface StashPlacementDto {
   container: GridContainer
@@ -135,6 +142,8 @@ export interface StashPlacementDto {
   y: number
   w: number
   h: number
+  // Quantity placed in *this* cell. Stackable templates may have multiple placements
+  // (multi-stack) across one or more containers — don't assume a template appears once.
   quantity: number
   // Set when container === 'Container': the backpack/rig instance this grid belongs to.
   containerInstanceId?: string | null
@@ -157,11 +166,13 @@ export interface MoveStashItemRequest {
   y: number
   fromContainer: GridContainer
   toContainer: GridContainer
-  // Stacks may move a partial amount; omit/null moves the whole stack.
+  // Stacks may move a partial amount; omit/null moves the whole stack. Dropping onto
+  // an existing same-template stack merges up to maxStack (overflow stays behind).
   // Instances always move whole.
   quantity?: number | null
   // Required when the corresponding side is a nested Container (backpack/rig):
   // the equipped container instance id whose grid the item moves out of / into.
+  // Pockets is innate (no instance id needed) — omit for either side that's Pockets.
   fromContainerInstanceId?: string | null
   toContainerInstanceId?: string | null
 }
@@ -199,8 +210,10 @@ export interface UnequipRequest {
 }
 
 // ---- Raid / Extraction ----
-// A raid session: the player deploys from their LOADOUT, optionally loots, then
-// resolves by extracting (items return to Stash) or dying (brought + looted lost).
+// A raid session: the player deploys with everything outside the Stash (equipped
+// gear + pockets + nested backpack/rig contents — equipment alone is enough),
+// optionally loots, then resolves by extracting (items return to Stash) or dying
+// (brought + looted lost).
 // Statuses/kinds/sources serialize PascalCase.
 export type RaidStatus = 'Active' | 'Extracted' | 'Died'
 export type RaidItemKind = 'Stack' | 'Instance'
