@@ -61,6 +61,10 @@ public static class Enums
     public static string ToDb(this StashEntryKind k) => k == StashEntryKind.Instance ? "INSTANCE" : "STACK";
     public static StashEntryKind ToStashKind(string k) => k == "INSTANCE" ? StashEntryKind.Instance : StashEntryKind.Stack;
 
+    // --- GridContainer -----------------------------------------------------
+    public static string ToDb(this GridContainer c) => c == GridContainer.Loadout ? "LOADOUT" : "STASH";
+    public static GridContainer ToContainer(string c) => c == "LOADOUT" ? GridContainer.Loadout : GridContainer.Stash;
+
     // --- ItemCategory ------------------------------------------------------
     public static ItemCategory ToCategory(string c) => c switch
     {

@@ -6,13 +6,16 @@ namespace ItemMarket.Grains.Data;
 /// <summary>플레이어 마스터 한 줄.</summary>
 public sealed record PlayerRow(Guid Id, string DisplayName);
 
-/// <summary>스태시 배치 한 줄(stash_placement 원본). 유니크는 InstanceId 사용.</summary>
+/// <summary>스태시 배치 한 줄(stash_placement 원본). 유니크는 InstanceId 사용.
+/// Container=놓인 컨테이너, Quantity=스택형이 이 컨테이너에 가진 수량(유니크는 1).</summary>
 public sealed record StashPlacementRow(
+    GridContainer Container,
     StashEntryKind Kind,
     int TemplateId,
     Guid? InstanceId,
     int X,
-    int Y);
+    int Y,
+    int Quantity);
 
 /// <summary>매칭에 필요한 아이템 템플릿 속성.</summary>
 public sealed record TemplateRow(int Id, bool Stackable);

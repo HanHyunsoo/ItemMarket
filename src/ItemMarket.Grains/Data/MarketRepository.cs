@@ -308,62 +308,108 @@ public sealed class MarketRepository(string connectionString)
             new { playerId, templateId, qty }, tx);
 
     // ======================================================================
-    //  스태시(그리드 인벤토리)
-    //  Postgres가 소스오브트루스. 배치는 (player, template, kind) 또는 instance 단위로 유일.
+    //  스태시(그리드 인벤토리) — 컨테이너(STASH/LOADOUT) 인지
+    //  Postgres가 소스오브트루스. 스택 배치는 (player, container, template) 당 한 줄(+수량),
+    //  유니크는 instance 단위로 전역 유일(정확히 한 컨테이너+한 칸).
+    //  소유 수량 자체의 진실은 inventory_stack/item_instance이며, 배치는 조직화(위치/컨테이너)일 뿐.
     // ======================================================================
 
-    /// <summary>플레이어의 모든 스태시 배치를 로드.</summary>
+    /// <summary>플레이어의 모든 컨테이너 스태시 배치를 로드.</summary>
     public async Task<IReadOnlyList<StashPlacementRow>> GetStashPlacementsAsync(Guid playerId)
     {
         await using var db = Open();
         var rows = await db.QueryAsync(
-            "SELECT kind, template_id, instance_id, x, y FROM stash_placement WHERE player_id = @playerId",
+            "SELECT container, kind, template_id, instance_id, x, y, quantity FROM stash_placement WHERE player_id = @playerId",
             new { playerId });
         return rows.Select(r => new StashPlacementRow(
-            Enums.ToStashKind((string)r.kind), (int)r.template_id, (Guid?)r.instance_id,
-            (int)r.x, (int)r.y)).ToList();
+            Enums.ToContainer((string)r.container), Enums.ToStashKind((string)r.kind),
+            (int)r.template_id, (Guid?)r.instance_id,
+            (int)r.x, (int)r.y, (int)r.quantity)).ToList();
     }
 
-    /// <summary>스택형 배치 upsert: (player, template) 당 한 칸. 위치만 갱신.</summary>
-    public async Task UpsertStackPlacementAsync(Guid playerId, int templateId, int x, int y)
+    /// <summary>스택형 배치 upsert: (player, container, template) 당 한 칸. 위치+수량을 절대값으로 설정.</summary>
+    public async Task UpsertStackPlacementAsync(Guid playerId, GridContainer container, int templateId, int x, int y, int quantity)
     {
         await using var db = Open();
         await db.ExecuteAsync(
-            @"INSERT INTO stash_placement(player_id, kind, template_id, instance_id, x, y)
-              VALUES (@playerId, 'STACK', @templateId, NULL, @x, @y)
-              ON CONFLICT (player_id, template_id) WHERE kind = 'STACK'
-              DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y",
-            new { playerId, templateId, x, y });
+            @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, x, y, quantity)
+              VALUES (@playerId, @container, 'STACK', @templateId, NULL, @x, @y, @quantity)
+              ON CONFLICT (player_id, container, template_id) WHERE kind = 'STACK'
+              DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y, quantity = EXCLUDED.quantity",
+            new { playerId, container = container.ToDb(), templateId, x, y, quantity });
     }
 
-    /// <summary>유니크 배치 upsert: 인스턴스 단위로 유일. 위치만 갱신.</summary>
-    public async Task UpsertInstancePlacementAsync(Guid playerId, int templateId, Guid instanceId, int x, int y)
+    /// <summary>유니크 배치 upsert: 인스턴스 단위로 전역 유일. 컨테이너+위치 갱신.</summary>
+    public async Task UpsertInstancePlacementAsync(Guid playerId, GridContainer container, int templateId, Guid instanceId, int x, int y)
     {
         await using var db = Open();
         await db.ExecuteAsync(
-            @"INSERT INTO stash_placement(player_id, kind, template_id, instance_id, x, y)
-              VALUES (@playerId, 'INSTANCE', @templateId, @instanceId, @x, @y)
+            @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, x, y, quantity)
+              VALUES (@playerId, @container, 'INSTANCE', @templateId, @instanceId, @x, @y, 1)
               ON CONFLICT (instance_id)
-              DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y, player_id = EXCLUDED.player_id",
-            new { playerId, templateId, instanceId, x, y });
+              DO UPDATE SET container = EXCLUDED.container, x = EXCLUDED.x, y = EXCLUDED.y, player_id = EXCLUDED.player_id",
+            new { playerId, container = container.ToDb(), templateId, instanceId, x, y });
     }
 
-    /// <summary>더 이상 소유하지 않는 스택형 배치 정리.</summary>
-    public async Task DeleteStackPlacementAsync(Guid playerId, int templateId)
+    /// <summary>특정 컨테이너의 스택형 배치 삭제(수량이 0이 되거나 더 이상 소유하지 않을 때).</summary>
+    public async Task DeleteStackPlacementAsync(Guid playerId, GridContainer container, int templateId)
     {
         await using var db = Open();
         await db.ExecuteAsync(
-            "DELETE FROM stash_placement WHERE player_id = @playerId AND kind = 'STACK' AND template_id = @templateId",
-            new { playerId, templateId });
+            "DELETE FROM stash_placement WHERE player_id = @playerId AND container = @container AND kind = 'STACK' AND template_id = @templateId",
+            new { playerId, container = container.ToDb(), templateId });
     }
 
-    /// <summary>더 이상 소유하지 않는 유니크 배치 정리.</summary>
+    /// <summary>더 이상 소유하지 않는 유니크 배치 정리(컨테이너 무관, 전역 유일).</summary>
     public async Task DeleteInstancePlacementAsync(Guid playerId, Guid instanceId)
     {
         await using var db = Open();
         await db.ExecuteAsync(
             "DELETE FROM stash_placement WHERE player_id = @playerId AND kind = 'INSTANCE' AND instance_id = @instanceId",
             new { playerId, instanceId });
+    }
+
+    /// <summary>
+    /// 스택 수량의 컨테이너 간 원자 이동(반입/반출). 한 트랜잭션으로:
+    ///   원본 컨테이너 배치에서 moveQty 차감(0이면 삭제) + 대상 컨테이너 배치에 가산
+    ///   (기존 배치가 있으면 위치 유지·수량 가산, 없으면 (toX,toY)에 새 칸 생성).
+    /// inventory_stack 총량은 건드리지 않는다(보존). 원본 수량이 부족하면 PlacementInvalid.
+    /// </summary>
+    public async Task MoveStackAcrossContainersAsync(
+        Guid playerId, int templateId, GridContainer from, GridContainer to, int moveQty, int toX, int toY)
+    {
+        await using var db = Open();
+        await using var tx = await db.BeginTransactionAsync();
+
+        var fromQty = await db.ExecuteScalarAsync<int?>(
+            @"SELECT quantity FROM stash_placement
+              WHERE player_id = @playerId AND container = @from AND kind = 'STACK' AND template_id = @templateId
+              FOR UPDATE",
+            new { playerId, from = from.ToDb(), templateId }, tx);
+        if (fromQty is null || fromQty < moveQty)
+        {
+            await tx.RollbackAsync();
+            throw new DomainException(ErrorCode.PlacementInvalid, "원본 컨테이너의 스택 수량이 부족합니다.");
+        }
+
+        var remaining = fromQty.Value - moveQty;
+        if (remaining == 0)
+            await db.ExecuteAsync(
+                "DELETE FROM stash_placement WHERE player_id = @playerId AND container = @from AND kind = 'STACK' AND template_id = @templateId",
+                new { playerId, from = from.ToDb(), templateId }, tx);
+        else
+            await db.ExecuteAsync(
+                "UPDATE stash_placement SET quantity = @remaining WHERE player_id = @playerId AND container = @from AND kind = 'STACK' AND template_id = @templateId",
+                new { remaining, playerId, from = from.ToDb(), templateId }, tx);
+
+        await db.ExecuteAsync(
+            @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, x, y, quantity)
+              VALUES (@playerId, @to, 'STACK', @templateId, NULL, @toX, @toY, @moveQty)
+              ON CONFLICT (player_id, container, template_id) WHERE kind = 'STACK'
+              DO UPDATE SET quantity = stash_placement.quantity + EXCLUDED.quantity",
+            new { playerId, to = to.ToDb(), templateId, toX, toY, moveQty }, tx);
+
+        await tx.CommitAsync();
     }
 
     // ======================================================================
