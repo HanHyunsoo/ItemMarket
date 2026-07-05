@@ -28,3 +28,6 @@ pgdata/
 
 # ---- Claude worktrees (로컬 전용) ----
 .claude/worktrees/
+
+# ---- 로컬 전용 노트(면접전략 등, 비공개) ----
+.notes/
