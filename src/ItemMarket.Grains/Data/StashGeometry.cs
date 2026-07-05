@@ -11,25 +11,30 @@ public readonly record struct Rect(int X, int Y, int W, int H);
 /// </summary>
 public static class StashGeometry
 {
-    /// <summary>STASH(안전 보관소) 크기(칸). 좌상단 (0,0) 기준.</summary>
-    public const int StashW = 10;
-    public const int StashH = 12;
+    /// <summary>STASH(안전 보관소) 가로 폭(칸). 고정값 — 코드 상수. 세로(행 수)는 player.stash_rows(가변).</summary>
+    public const int StashWidth = 12;
 
-    /// <summary>LOADOUT(레이드 반입) 크기(칸). STASH보다 작다.</summary>
-    public const int LoadoutW = 6;
-    public const int LoadoutH = 8;
+    /// <summary>POCKETS(캐릭터 내재 주머니) 크기(칸). 고정 4×1 — 착용 장비처럼 항상 존재한다.</summary>
+    public const int PocketsWidth = 4;
+    public const int PocketsHeight = 1;
 
-    /// <summary>컨테이너의 (폭, 높이). 컨테이너별 크기의 단일 조회 지점.</summary>
-    public static (int W, int H) Dims(GridContainer container) => container switch
+    /// <summary>
+    /// 컨테이너의 (폭, 높이). STASH는 stashRows(플레이어별 가변 세로)가 필요하다.
+    /// Container(중첩 백팩/리그)는 인스턴스별 동적 크기라 여기서 다루지 않는다 —
+    /// 호출자가 컨테이너 인스턴스의 template에서 조회한 뒤 (int gw, int gh) 오버로드를 쓴다.
+    /// </summary>
+    public static (int W, int H) Dims(GridContainer container, int stashRows) => container switch
     {
-        GridContainer.Loadout => (LoadoutW, LoadoutH),
-        _ => (StashW, StashH)
+        GridContainer.Pockets => (PocketsWidth, PocketsHeight),
+        GridContainer.Stash => (StashWidth, stashRows),
+        _ => throw new ArgumentOutOfRangeException(nameof(container), container,
+            "Container(중첩 그리드) 크기는 컨테이너 인스턴스의 template에서 별도 조회해야 합니다.")
     };
 
     /// <summary>footprint가 컨테이너 경계 안에 완전히 들어오는가.</summary>
-    public static bool InBounds(GridContainer container, Rect r)
+    public static bool InBounds(GridContainer container, Rect r, int stashRows)
     {
-        var (gw, gh) = Dims(container);
+        var (gw, gh) = Dims(container, stashRows);
         return InBounds(gw, gh, r);
     }
 
@@ -47,8 +52,11 @@ public static class StashGeometry
     /// w×h footprint를 놓을 수 있는 첫 자리를 좌상단→오른쪽→아래로 스캔해 찾는다.
     /// occupied와 겹치지 않고 컨테이너 경계 안이면 그 (x,y)를 반환. 없으면 null.
     /// </summary>
-    public static (int X, int Y)? FirstFit(GridContainer container, IReadOnlyCollection<Rect> occupied, int w, int h)
-        => FirstFit(Dims(container).W, Dims(container).H, occupied, w, h);
+    public static (int X, int Y)? FirstFit(GridContainer container, IReadOnlyCollection<Rect> occupied, int w, int h, int stashRows)
+    {
+        var (gw, gh) = Dims(container, stashRows);
+        return FirstFit(gw, gh, occupied, w, h);
+    }
 
     /// <summary>w×h footprint를 gw×gh 그리드에서 first-fit으로 찾는다(동적 크기용). 없으면 null.</summary>
     public static (int X, int Y)? FirstFit(int gw, int gh, IReadOnlyCollection<Rect> occupied, int w, int h)

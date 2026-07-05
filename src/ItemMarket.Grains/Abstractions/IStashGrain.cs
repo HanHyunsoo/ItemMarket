@@ -4,7 +4,7 @@ using ItemMarket.Contracts.Stash;
 namespace ItemMarket.Grains.Abstractions;
 
 /// <summary>
-/// 플레이어 스태시(키 = playerId). 컨테이너(STASH/LOADOUT/장착된 백팩·리그의 중첩 그리드) 인지
+/// 플레이어 스태시(키 = playerId). 컨테이너(STASH/POCKETS/장착된 백팩·리그의 중첩 그리드) 인지
 /// 그리드 배치 + 서버 권위 이동 검증 + 장비(equipment) 슬롯 조작. grain은 플레이어당 단일 활성화라
 /// 한 플레이어의 모든 컨테이너/장비 조작이 직렬화된다(컨테이너 간 이동·장착/해제도 하나의 활성화
 /// 안에서 검증·영속화되므로 원자적이며 정합화(reconcile)와 경합하지 않는다).

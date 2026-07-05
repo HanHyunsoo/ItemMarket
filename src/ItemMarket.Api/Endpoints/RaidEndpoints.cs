@@ -7,7 +7,7 @@ namespace ItemMarket.Api.Endpoints;
 
 /// <summary>
 /// 익스트랙션 레이드 — 서비스 계층 세션 상태기계. 실제 통합에서는 게임 서버가 호출한다
-/// (게임플레이 틱/전투는 범위 밖). 루프: 로드아웃을 채운다 → StartRaid → Extract | Die.
+/// (게임플레이 틱/전투는 범위 밖). 루프: 장비를 착용하고 주머니를 채운다 → StartRaid → Extract | Die.
 /// </summary>
 public static class RaidEndpoints
 {
@@ -23,7 +23,8 @@ public static class RaidEndpoints
         api.MapGet("/history", (ClaimsPrincipal u, IGrainFactory gf, int page = 1, int size = 20) =>
             Exec(() => gf.GetGrain<IRaidSessionGrain>(CurrentPlayer(u)).GetHistory(page, size)));
 
-        // 레이드 시작: 로드아웃을 위험(at-risk)으로 잠근다. ACTIVE 세션이 이미 있으면 RaidActive(409).
+        // 레이드 시작: 스태시 밖 전부(장비+주머니+중첩 컨테이너)를 위험(at-risk)으로 잠근다.
+        // ACTIVE 세션이 이미 있으면 RaidActive(409), 반입할 것이 전혀 없으면 RaidNothingToDeploy(400).
         api.MapPost("/start", (ClaimsPrincipal u, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IRaidSessionGrain>(CurrentPlayer(u)).StartRaid()));
 

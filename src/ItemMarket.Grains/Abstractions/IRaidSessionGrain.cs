@@ -20,8 +20,10 @@ public interface IRaidSessionGrain : IGrainWithGuidKey
     Task<PagedResult<RaidHistoryEntryDto>> GetHistory(int page, int size);
 
     /// <summary>
-    /// 레이드 시작: ACTIVE 세션이 없어야 한다(있으면 RaidActive). 로드아웃 아이템을 위험(at-risk)으로
-    /// 잠그고(판매/이동 불가) 위험 스냅샷으로 옮긴다. 반환은 새 ACTIVE 세션.
+    /// 레이드 시작: ACTIVE 세션이 없어야 한다(있으면 RaidActive). 스태시 밖 전부(장착 장비 +
+    /// 장착된 백팩/리그 내용물 + 주머니)를 위험(at-risk)으로 잠그고(판매/이동 불가) 위험 스냅샷으로
+    /// 옮긴다. 스태시 밖이 전부 비어 있으면 RaidNothingToDeploy(장비만 있어도 항상 성공한다).
+    /// 반환은 새 ACTIVE 세션.
     /// </summary>
     Task<RaidSessionDto> StartRaid();
 

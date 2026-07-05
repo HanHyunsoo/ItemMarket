@@ -8,7 +8,7 @@ using static ItemMarket.Api.Infrastructure.ApiResults;
 namespace ItemMarket.Api.Endpoints;
 
 /// <summary>
-/// 스태시 — 컨테이너(STASH 10×12 / LOADOUT 6×8) 그리드 위 아이템 배치 조회 / 서버 권위 이동.
+/// 스태시 — 컨테이너(STASH 12×가변(player.stash_rows) / POCKETS 4×1) 그리드 위 아이템 배치 조회 / 서버 권위 이동.
 /// </summary>
 public static class StashEndpoints
 {
@@ -20,7 +20,7 @@ public static class StashEndpoints
         api.MapGet("/stash", (ClaimsPrincipal u, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IStashGrain>(CurrentPlayer(u)).GetStash(GridContainer.Stash)));
 
-        // 컨테이너별 조회: /api/stash/stash | /api/stash/loadout (대소문자 무시).
+        // 컨테이너별 조회: /api/stash/stash | /api/stash/pockets (대소문자 무시).
         api.MapGet("/stash/{container}", (string container, ClaimsPrincipal u, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IStashGrain>(CurrentPlayer(u)).GetStash(ParseContainer(container))));
 
@@ -34,5 +34,5 @@ public static class StashEndpoints
     private static GridContainer ParseContainer(string raw)
         => Enum.TryParse<GridContainer>(raw, ignoreCase: true, out var c)
             ? c
-            : throw new DomainException(ErrorCode.ValidationError, $"알 수 없는 컨테이너: {raw} (stash | loadout).");
+            : throw new DomainException(ErrorCode.ValidationError, $"알 수 없는 컨테이너: {raw} (stash | pockets).");
 }

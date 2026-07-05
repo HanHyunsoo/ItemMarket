@@ -5,8 +5,8 @@ using ItemMarket.Contracts.Stash;
 
 namespace ItemMarket.Grains.Data;
 
-/// <summary>플레이어 마스터 한 줄.</summary>
-public sealed record PlayerRow(Guid Id, string DisplayName);
+/// <summary>플레이어 마스터 한 줄. StashRows=스태시 세로 칸 수(가로는 StashGeometry.StashWidth로 고정).</summary>
+public sealed record PlayerRow(Guid Id, string DisplayName, int StashRows);
 
 /// <summary>스태시 배치 한 줄(stash_placement 원본). 유니크는 InstanceId 사용.
 /// Container=놓인 컨테이너, Quantity=스택형이 이 컨테이너에 가진 수량(유니크는 1).</summary>

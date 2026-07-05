@@ -7,7 +7,7 @@ using ItemMarket.Grains.Data;
 namespace ItemMarket.Grains.Grains;
 
 /// <summary>
-/// 스태시 grain(키 = playerId). 컨테이너(STASH/LOADOUT/중첩 백팩·리그) 인지. ===== 동시성 =====
+/// 스태시 grain(키 = playerId). 컨테이너(STASH/POCKETS/중첩 백팩·리그) 인지. ===== 동시성 =====
 ///
 /// WalletGrain/PlayerInventoryGrain과 같은 무상태(pass-through) 설계다. 그리드를
 /// 인메모리에 캐시하지 않고 매 호출마다 Postgres(소스오브트루스)에서 배치·인벤·카탈로그·장비를
@@ -21,21 +21,30 @@ namespace ItemMarket.Grains.Grains;
 /// 미배치 소유 아이템은 안전을 위해 항상 STASH에 자동 배치된다. 단, 장착(equipment)된 인스턴스는
 /// 인형(doll) 위에 있어 그리드 자동 배치 대상에서 제외한다. 장착된 백팩/리그는 내부 그리드
 /// (중첩 컨테이너)를 제공하며, 그 그리드에 놓인 배치는 container_instance_id로 주소화된다.
+///
+/// ===== 다중 스택 =====
+/// 같은 스택형 템플릿이 여러 칸(여러 물리 컨테이너에 걸쳐서도)에 나뉘어 존재할 수 있다.
+/// 각 칸의 수량은 template.max_stack을 넘지 않는다. 자동 배치(정합화)는 기존 칸을 max_stack까지
+/// 채운 뒤, 남는 수량을 max_stack 단위로 쪼개 새 칸에 first-fit으로 배치한다. 이동(MoveItem)은
+/// 원본 물리 컨테이너 안의 같은 템플릿 스택 전체를 "교환 가능한 풀"로 보고, 목적지 칸으로
+/// 최대 max_stack까지 병합하며 초과분은 원본 풀에 남긴다(MarketRepository.MoveStackAsync 참고).
 /// </summary>
 public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
 {
     private Guid PlayerId => this.GetPrimaryKey();
 
-    /// <summary>물리 컨테이너 참조: 종류(STASH/LOADOUT/중첩) + 중첩일 때 컨테이너 인스턴스 id.</summary>
+    /// <summary>물리 컨테이너 참조: 종류(STASH/POCKETS/중첩) + 중첩일 때 컨테이너 인스턴스 id.</summary>
     private readonly record struct ContainerRef(GridContainer Kind, Guid? InstanceId);
 
-    /// <summary>한 grain 호출에서 재사용하는 로드 상태(인벤·카탈로그·장비 파생).</summary>
+    /// <summary>한 grain 호출에서 재사용하는 로드 상태(인벤·카탈로그·장비·플레이어 파생).</summary>
     private sealed record Ctx(
         Dictionary<int, int> OwnedStacks,
         Dictionary<Guid, int> OwnedInstances,
         Dictionary<int, (int W, int H)> Footprints,
+        Dictionary<int, int> MaxStacks,
         HashSet<Guid> EquippedInstanceIds,
-        Dictionary<Guid, (int W, int H)> NestedDims);
+        Dictionary<Guid, (int W, int H)> NestedDims,
+        int StashRows);
 
     public async Task<StashDto> GetStash(GridContainer container)
     {
@@ -158,11 +167,11 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
             throw new DomainException(ErrorCode.PlacementInvalid, "유효한 중첩 컨테이너(장착된 백팩/리그)가 아닙니다.");
     }
 
-    /// <summary>컨테이너 참조의 그리드 크기. STASH/LOADOUT은 고정, 중첩은 컨테이너 인스턴스의 template에서.</summary>
+    /// <summary>컨테이너 참조의 그리드 크기. STASH(12×stashRows)/POCKETS(4×1)는 고정 공식, 중첩은 컨테이너 인스턴스의 template에서.</summary>
     private static (int W, int H) DimsOf(ContainerRef c, Ctx ctx)
         => c.Kind == GridContainer.Container
             ? ctx.NestedDims[c.InstanceId!.Value]
-            : StashGeometry.Dims(c.Kind);
+            : StashGeometry.Dims(c.Kind, ctx.StashRows);
 
     /// <summary>배치가 컨테이너 참조와 같은 물리 컨테이너에 속하는가(중첩은 인스턴스 id까지 일치).</summary>
     private static bool SameContainer(StashPlacementRow p, ContainerRef c)
@@ -182,51 +191,32 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
         await repo.UpsertInstancePlacementAsync(PlayerId, to.Kind, templateId, req.InstanceId!.Value, req.X, req.Y, to.InstanceId);
     }
 
-    // ---- 스택 이동: 같은 컨테이너면 위치 재배치, 다른 컨테이너면 수량(부분) 원자 이동. ----
+    /// <summary>
+    /// 스택 이동: 원본 물리 컨테이너 안의 같은 템플릿 스택 전체를 "교환 가능한 풀"로 보고
+    /// 목적지 칸(ToContainer, X, Y)으로 옮긴다. 같은 컨테이너 재배치/다른 컨테이너 반입·반출을
+    /// 하나의 경로로 통일한다(다중 스택 지원 후 특정 칸 하나만 지정할 방법이 계약에 없으므로,
+    /// "이 컨테이너 안의 그 템플릿"을 풀로 다루는 것이 유일하게 모호하지 않은 해석이다).
+    /// 목적지 칸의 겹침/경계 검증은 여기서, 수량 차감·max_stack 병합·오버플로 처리는
+    /// MarketRepository.MoveStackAsync(단일 트랜잭션)에서 한다.
+    /// </summary>
     private async Task MoveStackAsync(
         MoveStashItemRequest req, ContainerRef from, ContainerRef to, int templateId, Rect target,
         int gw, int gh, List<StashPlacementRow> placements, Ctx ctx)
     {
-        if (from == to)
-        {
-            // 같은 컨테이너 재배치: 경계+겹침 검증(자신 제외) 후 위치만 갱신(수량 유지).
-            if (!StashGeometry.InBounds(gw, gh, target))
-                throw new DomainException(ErrorCode.PlacementInvalid, "배치가 대상 컨테이너 경계를 벗어납니다.");
-            EnsureNoOverlap(to, target, placements, ctx.Footprints,
-                isSelf: p => IsStackIn(p, to, templateId));
+        if (!StashGeometry.InBounds(gw, gh, target))
+            throw new DomainException(ErrorCode.PlacementInvalid, "배치가 대상 컨테이너 경계를 벗어납니다.");
 
-            var current = placements.FirstOrDefault(p => IsStackIn(p, to, templateId));
-            var qty = current?.Quantity ?? 0;
-            if (qty <= 0)
-                throw new DomainException(ErrorCode.PlacementInvalid, "해당 컨테이너에 스택이 없습니다.");
-            await repo.UpsertStackPlacementAsync(PlayerId, to.Kind, templateId, req.X, req.Y, qty, to.InstanceId);
-            return;
-        }
-
-        // 컨테이너 간 이동(반입/반출).
-        var source = placements.FirstOrDefault(p => IsStackIn(p, from, templateId));
-        if (source is null || source.Quantity <= 0)
-            throw new DomainException(ErrorCode.PlacementInvalid, "원본 컨테이너에 해당 스택이 없습니다.");
-
-        var moveQty = req.Quantity ?? source.Quantity;
-        if (moveQty < 1 || moveQty > source.Quantity)
-            throw new DomainException(ErrorCode.ValidationError, "이동 수량이 원본 컨테이너의 보유 수량 범위를 벗어납니다.");
-
-        // 대상 컨테이너에 같은 스택 칸이 없으면 새 칸을 만드므로 경계+겹침을 검증한다(있으면 기존 칸에 수량만 가산).
-        var destExisting = placements.FirstOrDefault(p => IsStackIn(p, to, templateId));
-        if (destExisting is null)
-        {
-            if (!StashGeometry.InBounds(gw, gh, target))
-                throw new DomainException(ErrorCode.PlacementInvalid, "배치가 대상 컨테이너 경계를 벗어납니다.");
+        // 목적지 칸에 정확히 이미 있는 배치(있다면) — 같은 템플릿 스택이면 병합 대상, 아니면 충돌.
+        var destOccupant = placements.FirstOrDefault(p => SameContainer(p, to) && p.X == req.X && p.Y == req.Y);
+        if (destOccupant is not null && !(destOccupant.Kind == StashEntryKind.Stack && destOccupant.TemplateId == templateId))
+            throw new DomainException(ErrorCode.PlacementInvalid, "다른 아이템과 겹칩니다.");
+        if (destOccupant is null)
             EnsureNoOverlap(to, target, placements, ctx.Footprints, isSelf: _ => false);
-        }
 
-        await repo.MoveStackAcrossContainersAsync(PlayerId, templateId, from.Kind, to.Kind, moveQty, req.X, req.Y,
-            from.InstanceId, to.InstanceId);
+        var maxStack = ctx.MaxStacks.GetValueOrDefault(templateId, 1);
+        await repo.MoveStackAsync(PlayerId, templateId, from.Kind, from.InstanceId, to.Kind, to.InstanceId,
+            req.X, req.Y, req.Quantity, maxStack);
     }
-
-    private static bool IsStackIn(StashPlacementRow p, ContainerRef c, int templateId)
-        => p.Kind == StashEntryKind.Stack && p.TemplateId == templateId && SameContainer(p, c);
 
     /// <summary>대상 컨테이너의 다른 배치와 겹치면 PlacementInvalid. isSelf로 이동 대상 자신은 제외.</summary>
     private static void EnsureNoOverlap(
@@ -247,8 +237,9 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
     /// <summary>
     /// 배치를 소유 현황과 정합화·영속화한다. 자동 배치 대상은 항상 STASH.
     ///   - 더 이상 소유하지 않는 배치 삭제
-    ///   - 스택 총 배치량 &lt; 소유량: 부족분을 STASH에 가산/신규 배치
-    ///   - 스택 총 배치량 &gt; 소유량: 초과분을 STASH→LOADOUT→중첩 순으로 제거(매도/소비 반영)
+    ///   - 스택 총 배치량 &lt; 소유량: 기존 STASH 칸을 max_stack까지 채운 뒤, 남는 수량을
+    ///     max_stack 단위로 쪼개 새 칸에 first-fit 배치(다중 스택)
+    ///   - 스택 총 배치량 &gt; 소유량: 초과분을 STASH→POCKETS→중첩 순으로 제거(매도/소비 반영)
     ///   - 미배치 인스턴스: STASH에 first-fit 자동 배치(단, 장착 중인 인스턴스는 인형 위에 있어 제외)
     /// </summary>
     private async Task ReconcileAsync(Ctx ctx)
@@ -298,21 +289,32 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
             if (allocated < total)
             {
                 var deficit = total - allocated;
-                var stash = ps.FirstOrDefault(p => p.Container == GridContainer.Stash);
-                if (stash is not null)
+                var maxStack = ctx.MaxStacks.GetValueOrDefault(template, 1);
+
+                // 2-1) 기존 STASH 칸부터 max_stack까지 채운다(다중 스택 우선 소진).
+                foreach (var p in ps.Where(p => p.Container == GridContainer.Stash))
                 {
-                    await repo.UpsertStackPlacementAsync(PlayerId, GridContainer.Stash, template, stash.X, stash.Y, stash.Quantity + deficit);
+                    if (deficit <= 0) break;
+                    var room = maxStack - p.Quantity;
+                    if (room <= 0) continue;
+                    var add = Math.Min(room, deficit);
+                    await repo.UpsertStackPlacementAsync(PlayerId, GridContainer.Stash, template, p.X, p.Y, p.Quantity + add);
+                    deficit -= add;
                 }
-                else
+
+                // 2-2) 남은 부족분은 max_stack 단위로 쪼개 새 칸에 first-fit 배치.
+                while (deficit > 0)
                 {
-                    var fit = StashGeometry.FirstFit(GridContainer.Stash, stashOccupied, 1, 1);
-                    if (fit is null) continue; // 자리 없음 → Unplaced로 노출(스냅샷에서 계산)
+                    var chunk = Math.Min(deficit, maxStack);
+                    var fit = StashGeometry.FirstFit(GridContainer.Stash, stashOccupied, 1, 1, ctx.StashRows);
+                    if (fit is null) break; // 자리 없음 → Unplaced로 노출(스냅샷에서 계산)
                     var (x, y) = fit.Value;
                     stashOccupied.Add(new Rect(x, y, 1, 1));
-                    await repo.UpsertStackPlacementAsync(PlayerId, GridContainer.Stash, template, x, y, deficit);
+                    await repo.UpsertStackPlacementAsync(PlayerId, GridContainer.Stash, template, x, y, chunk);
+                    deficit -= chunk;
                 }
             }
-            else // allocated > total: 초과분 제거(STASH → LOADOUT → 중첩 순).
+            else // allocated > total: 초과분 제거(STASH → POCKETS → 중첩 순).
             {
                 var surplus = allocated - total;
                 foreach (var p in ps.OrderBy(ContainerRank))
@@ -322,7 +324,7 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
                     surplus -= take;
                     var newQty = p.Quantity - take;
                     if (newQty == 0)
-                        await repo.DeleteStackPlacementAsync(PlayerId, p.Container, template, p.ContainerInstanceId);
+                        await repo.DeleteStackPlacementAsync(PlayerId, p.Container, template, p.ContainerInstanceId, p.X, p.Y);
                     else
                         await repo.UpsertStackPlacementAsync(PlayerId, p.Container, template, p.X, p.Y, newQty, p.ContainerInstanceId);
                 }
@@ -335,7 +337,7 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
             if (ctx.EquippedInstanceIds.Contains(id)) continue;
             if (liveInstances.Any(p => p.InstanceId == id)) continue;
             var (w, h) = footprints.GetValueOrDefault(template, (1, 1));
-            var fit = StashGeometry.FirstFit(GridContainer.Stash, stashOccupied, w, h);
+            var fit = StashGeometry.FirstFit(GridContainer.Stash, stashOccupied, w, h, ctx.StashRows);
             if (fit is null) continue; // 자리 없음 → Unplaced
             var (x, y) = fit.Value;
             stashOccupied.Add(new Rect(x, y, w, h));
@@ -343,11 +345,11 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
         }
     }
 
-    /// <summary>초과분 제거 우선순위: STASH(0) → LOADOUT(1) → 중첩 컨테이너(2).</summary>
+    /// <summary>초과분 제거 우선순위: STASH(0) → POCKETS(1) → 중첩 컨테이너(2).</summary>
     private static int ContainerRank(StashPlacementRow p) => p.Container switch
     {
         GridContainer.Stash => 0,
-        GridContainer.Loadout => 1,
+        GridContainer.Pockets => 1,
         _ => 2
     };
 
@@ -396,12 +398,15 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
         return new StashDto(PlayerId, container.Kind, gw, gh, placed, unplaced);
     }
 
-    /// <summary>인벤·카탈로그·장비를 읽어 한 호출에서 재사용할 파생 상태를 만든다.</summary>
+    /// <summary>인벤·카탈로그·장비·플레이어(스태시 세로 칸 수)를 읽어 한 호출에서 재사용할 파생 상태를 만든다.</summary>
     private async Task<Ctx> LoadAsync()
     {
+        var player = await repo.GetPlayerAsync(PlayerId)
+            ?? throw new DomainException(ErrorCode.PlayerNotFound, "플레이어를 찾을 수 없습니다.");
         var inv = await repo.GetInventoryAsync(PlayerId);
         var catalog = await repo.GetCatalogAsync();
         var footprints = catalog.ToDictionary(t => t.Id, t => (t.GridW, t.GridH));
+        var maxStacks = catalog.ToDictionary(t => t.Id, t => t.MaxStack);
         var containerDims = catalog.Where(t => t.IsContainer && t.ContainerW is not null && t.ContainerH is not null)
             .ToDictionary(t => t.Id, t => (t.ContainerW!.Value, t.ContainerH!.Value));
 
@@ -413,6 +418,6 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
 
         var ownedStacks = inv.Stacks.Where(s => s.Quantity > 0).ToDictionary(s => s.TemplateId, s => s.Quantity);
         var ownedInstances = inv.Instances.ToDictionary(i => i.Id, i => i.TemplateId);
-        return new Ctx(ownedStacks, ownedInstances, footprints, equippedIds, nestedDims);
+        return new Ctx(ownedStacks, ownedInstances, footprints, maxStacks, equippedIds, nestedDims, player.StashRows);
     }
 }

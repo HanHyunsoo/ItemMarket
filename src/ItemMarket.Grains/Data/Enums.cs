@@ -66,14 +66,14 @@ public static class Enums
     // --- GridContainer -----------------------------------------------------
     public static string ToDb(this GridContainer c) => c switch
     {
-        GridContainer.Loadout => "LOADOUT",
+        GridContainer.Pockets => "POCKETS",
         GridContainer.Container => "CONTAINER",
         _ => "STASH"
     };
 
     public static GridContainer ToContainer(string c) => c switch
     {
-        "LOADOUT" => GridContainer.Loadout,
+        "POCKETS" => GridContainer.Pockets,
         "CONTAINER" => GridContainer.Container,
         _ => GridContainer.Stash
     };
