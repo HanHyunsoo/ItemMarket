@@ -281,6 +281,7 @@ db/ · tests/ · tools/ · scripts/ · docs/ · Dockerfile · docker-compose.yml
 - [`docs/api-contract.md`](docs/api-contract.md) · [`docs/realtime-contract.md`](docs/realtime-contract.md) — REST/실시간 계약
 - [`docs/backend-audit.md`](docs/backend-audit.md) — 자체 감사(결함→수정→테스트)
 - [`docs/perf-report.md`](docs/perf-report.md) — 부하 테스트·병목 분석
+- [`docs/qa-report.md`](docs/qa-report.md) — QA 패스(기능+플레이테스트) 발견 이슈·개선 백로그
 
 ---
 
