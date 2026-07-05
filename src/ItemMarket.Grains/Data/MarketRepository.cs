@@ -1,5 +1,6 @@
 using Dapper;
 using ItemMarket.Contracts.Common;
+using ItemMarket.Contracts.Equipment;
 using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Orders;
 using ItemMarket.Contracts.Raid;
@@ -53,13 +54,16 @@ public sealed class MarketRepository(string connectionString)
     {
         await using var db = Open();
         var rows = await db.QueryAsync(
-            @"SELECT id, code, name, category, rarity, stackable, max_durability, icon, base_value, grid_w, grid_h
+            @"SELECT id, code, name, category, rarity, stackable, max_durability, icon, base_value, grid_w, grid_h,
+                     equip_slot, is_container, container_w, container_h
               FROM item_template ORDER BY id");
         return rows.Select(r => new ItemTemplateDto(
             (int)r.id, (string)r.code, (string)r.name,
             Enums.ToCategory((string)r.category), Enums.ToRarity((string)r.rarity),
             (bool)r.stackable, (int?)r.max_durability, (string)r.icon, (long)r.base_value,
-            (int)r.grid_w, (int)r.grid_h)).ToList();
+            (int)r.grid_w, (int)r.grid_h,
+            Enums.ToEquipSlotOrNull((string?)r.equip_slot), (bool)r.is_container,
+            (int?)r.container_w, (int?)r.container_h)).ToList();
     }
 
     public async Task<TemplateRow?> GetTemplateAsync(int id)
@@ -315,50 +319,65 @@ public sealed class MarketRepository(string connectionString)
     //  소유 수량 자체의 진실은 inventory_stack/item_instance이며, 배치는 조직화(위치/컨테이너)일 뿐.
     // ======================================================================
 
-    /// <summary>플레이어의 모든 컨테이너 스태시 배치를 로드.</summary>
+    /// <summary>플레이어의 모든 컨테이너 스태시 배치를 로드(중첩 컨테이너 배치 포함).</summary>
     public async Task<IReadOnlyList<StashPlacementRow>> GetStashPlacementsAsync(Guid playerId)
     {
         await using var db = Open();
         var rows = await db.QueryAsync(
-            "SELECT container, kind, template_id, instance_id, x, y, quantity FROM stash_placement WHERE player_id = @playerId",
+            "SELECT container, kind, template_id, instance_id, container_instance_id, x, y, quantity FROM stash_placement WHERE player_id = @playerId",
             new { playerId });
         return rows.Select(r => new StashPlacementRow(
             Enums.ToContainer((string)r.container), Enums.ToStashKind((string)r.kind),
             (int)r.template_id, (Guid?)r.instance_id,
-            (int)r.x, (int)r.y, (int)r.quantity)).ToList();
+            (int)r.x, (int)r.y, (int)r.quantity, (Guid?)r.container_instance_id)).ToList();
     }
 
-    /// <summary>스택형 배치 upsert: (player, container, template) 당 한 칸. 위치+수량을 절대값으로 설정.</summary>
-    public async Task UpsertStackPlacementAsync(Guid playerId, GridContainer container, int templateId, int x, int y, int quantity)
+    /// <summary>스택형 배치 upsert: (player, 물리 컨테이너, template) 당 한 칸. 위치+수량을 절대값으로 설정.
+    /// containerInstanceId는 중첩 컨테이너(container=Container)일 때만 지정, STASH/LOADOUT은 null.
+    /// grain이 플레이어당 직렬화되므로 update-then-insert가 안전(경합 없음).</summary>
+    public async Task UpsertStackPlacementAsync(Guid playerId, GridContainer container, int templateId, int x, int y, int quantity, Guid? containerInstanceId = null)
     {
         await using var db = Open();
-        await db.ExecuteAsync(
-            @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, x, y, quantity)
-              VALUES (@playerId, @container, 'STACK', @templateId, NULL, @x, @y, @quantity)
-              ON CONFLICT (player_id, container, template_id) WHERE kind = 'STACK'
-              DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y, quantity = EXCLUDED.quantity",
-            new { playerId, container = container.ToDb(), templateId, x, y, quantity });
+        await UpsertStackPlacementAsync(db, null, playerId, container, templateId, x, y, quantity, containerInstanceId);
+    }
+
+    private static async Task UpsertStackPlacementAsync(
+        NpgsqlConnection db, NpgsqlTransaction? tx, Guid playerId, GridContainer container,
+        int templateId, int x, int y, int quantity, Guid? containerInstanceId)
+    {
+        var updated = await db.ExecuteAsync(
+            @"UPDATE stash_placement SET x = @x, y = @y, quantity = @quantity
+              WHERE player_id = @playerId AND container = @container AND kind = 'STACK' AND template_id = @templateId
+                    AND container_instance_id IS NOT DISTINCT FROM @cid",
+            new { playerId, container = container.ToDb(), templateId, x, y, quantity, cid = containerInstanceId }, tx);
+        if (updated == 0)
+            await db.ExecuteAsync(
+                @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, container_instance_id, x, y, quantity)
+                  VALUES (@playerId, @container, 'STACK', @templateId, NULL, @cid, @x, @y, @quantity)",
+                new { playerId, container = container.ToDb(), templateId, cid = containerInstanceId, x, y, quantity }, tx);
     }
 
     /// <summary>유니크 배치 upsert: 인스턴스 단위로 전역 유일. 컨테이너+위치 갱신.</summary>
-    public async Task UpsertInstancePlacementAsync(Guid playerId, GridContainer container, int templateId, Guid instanceId, int x, int y)
+    public async Task UpsertInstancePlacementAsync(Guid playerId, GridContainer container, int templateId, Guid instanceId, int x, int y, Guid? containerInstanceId = null)
     {
         await using var db = Open();
         await db.ExecuteAsync(
-            @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, x, y, quantity)
-              VALUES (@playerId, @container, 'INSTANCE', @templateId, @instanceId, @x, @y, 1)
+            @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, container_instance_id, x, y, quantity)
+              VALUES (@playerId, @container, 'INSTANCE', @templateId, @instanceId, @cid, @x, @y, 1)
               ON CONFLICT (instance_id)
-              DO UPDATE SET container = EXCLUDED.container, x = EXCLUDED.x, y = EXCLUDED.y, player_id = EXCLUDED.player_id",
-            new { playerId, container = container.ToDb(), templateId, instanceId, x, y });
+              DO UPDATE SET container = EXCLUDED.container, container_instance_id = EXCLUDED.container_instance_id,
+                            x = EXCLUDED.x, y = EXCLUDED.y, player_id = EXCLUDED.player_id",
+            new { playerId, container = container.ToDb(), templateId, instanceId, cid = containerInstanceId, x, y });
     }
 
-    /// <summary>특정 컨테이너의 스택형 배치 삭제(수량이 0이 되거나 더 이상 소유하지 않을 때).</summary>
-    public async Task DeleteStackPlacementAsync(Guid playerId, GridContainer container, int templateId)
+    /// <summary>특정 물리 컨테이너의 스택형 배치 삭제(수량이 0이 되거나 더 이상 소유하지 않을 때).</summary>
+    public async Task DeleteStackPlacementAsync(Guid playerId, GridContainer container, int templateId, Guid? containerInstanceId = null)
     {
         await using var db = Open();
         await db.ExecuteAsync(
-            "DELETE FROM stash_placement WHERE player_id = @playerId AND container = @container AND kind = 'STACK' AND template_id = @templateId",
-            new { playerId, container = container.ToDb(), templateId });
+            @"DELETE FROM stash_placement WHERE player_id = @playerId AND container = @container AND kind = 'STACK'
+              AND template_id = @templateId AND container_instance_id IS NOT DISTINCT FROM @cid",
+            new { playerId, container = container.ToDb(), templateId, cid = containerInstanceId });
     }
 
     /// <summary>더 이상 소유하지 않는 유니크 배치 정리(컨테이너 무관, 전역 유일).</summary>
@@ -377,7 +396,8 @@ public sealed class MarketRepository(string connectionString)
     /// inventory_stack 총량은 건드리지 않는다(보존). 원본 수량이 부족하면 PlacementInvalid.
     /// </summary>
     public async Task MoveStackAcrossContainersAsync(
-        Guid playerId, int templateId, GridContainer from, GridContainer to, int moveQty, int toX, int toY)
+        Guid playerId, int templateId, GridContainer from, GridContainer to, int moveQty, int toX, int toY,
+        Guid? fromContainerInstanceId = null, Guid? toContainerInstanceId = null)
     {
         await using var db = Open();
         await using var tx = await db.BeginTransactionAsync();
@@ -385,8 +405,9 @@ public sealed class MarketRepository(string connectionString)
         var fromQty = await db.ExecuteScalarAsync<int?>(
             @"SELECT quantity FROM stash_placement
               WHERE player_id = @playerId AND container = @from AND kind = 'STACK' AND template_id = @templateId
+                    AND container_instance_id IS NOT DISTINCT FROM @fromCid
               FOR UPDATE",
-            new { playerId, from = from.ToDb(), templateId }, tx);
+            new { playerId, from = from.ToDb(), templateId, fromCid = fromContainerInstanceId }, tx);
         if (fromQty is null || fromQty < moveQty)
         {
             await tx.RollbackAsync();
@@ -396,21 +417,134 @@ public sealed class MarketRepository(string connectionString)
         var remaining = fromQty.Value - moveQty;
         if (remaining == 0)
             await db.ExecuteAsync(
-                "DELETE FROM stash_placement WHERE player_id = @playerId AND container = @from AND kind = 'STACK' AND template_id = @templateId",
-                new { playerId, from = from.ToDb(), templateId }, tx);
+                @"DELETE FROM stash_placement WHERE player_id = @playerId AND container = @from AND kind = 'STACK'
+                  AND template_id = @templateId AND container_instance_id IS NOT DISTINCT FROM @fromCid",
+                new { playerId, from = from.ToDb(), templateId, fromCid = fromContainerInstanceId }, tx);
         else
             await db.ExecuteAsync(
-                "UPDATE stash_placement SET quantity = @remaining WHERE player_id = @playerId AND container = @from AND kind = 'STACK' AND template_id = @templateId",
-                new { remaining, playerId, from = from.ToDb(), templateId }, tx);
+                @"UPDATE stash_placement SET quantity = @remaining WHERE player_id = @playerId AND container = @from
+                  AND kind = 'STACK' AND template_id = @templateId AND container_instance_id IS NOT DISTINCT FROM @fromCid",
+                new { remaining, playerId, from = from.ToDb(), templateId, fromCid = fromContainerInstanceId }, tx);
 
-        await db.ExecuteAsync(
-            @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, x, y, quantity)
-              VALUES (@playerId, @to, 'STACK', @templateId, NULL, @toX, @toY, @moveQty)
-              ON CONFLICT (player_id, container, template_id) WHERE kind = 'STACK'
-              DO UPDATE SET quantity = stash_placement.quantity + EXCLUDED.quantity",
-            new { playerId, to = to.ToDb(), templateId, toX, toY, moveQty }, tx);
+        // 대상 물리 컨테이너에 같은 스택 칸이 있으면 수량 가산, 없으면 새 칸 생성.
+        var destQty = await db.ExecuteScalarAsync<int?>(
+            @"SELECT quantity FROM stash_placement
+              WHERE player_id = @playerId AND container = @to AND kind = 'STACK' AND template_id = @templateId
+                    AND container_instance_id IS NOT DISTINCT FROM @toCid
+              FOR UPDATE",
+            new { playerId, to = to.ToDb(), templateId, toCid = toContainerInstanceId }, tx);
+        if (destQty is null)
+            await db.ExecuteAsync(
+                @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, container_instance_id, x, y, quantity)
+                  VALUES (@playerId, @to, 'STACK', @templateId, NULL, @toCid, @toX, @toY, @moveQty)",
+                new { playerId, to = to.ToDb(), templateId, toCid = toContainerInstanceId, toX, toY, moveQty }, tx);
+        else
+            await db.ExecuteAsync(
+                @"UPDATE stash_placement SET quantity = quantity + @moveQty WHERE player_id = @playerId AND container = @to
+                  AND kind = 'STACK' AND template_id = @templateId AND container_instance_id IS NOT DISTINCT FROM @toCid",
+                new { playerId, to = to.ToDb(), templateId, toCid = toContainerInstanceId, moveQty }, tx);
 
         await tx.CommitAsync();
+    }
+
+    // ======================================================================
+    //  장비(equipment) — 슬롯 → 인스턴스 매핑 + 중첩 컨테이너(백팩/리그) 지원.
+    //  장착된 인스턴스는 소유(owner=player) 상태이나 스태시 그리드에는 배치되지 않는다
+    //  (인형 위에 있음 → StashGrain 정합화가 이 인스턴스를 STASH로 자동 배치하지 않도록 제외).
+    // ======================================================================
+
+    /// <summary>플레이어의 장착 슬롯 목록(slot → instance + template).</summary>
+    public async Task<IReadOnlyList<EquipmentSlotRow>> GetEquipmentAsync(Guid playerId)
+    {
+        await using var db = Open();
+        var rows = await db.QueryAsync(
+            @"SELECT pe.slot, pe.instance_id, ii.template_id
+              FROM player_equipment pe
+              JOIN item_instance ii ON ii.id = pe.instance_id
+              WHERE pe.player_id = @playerId
+              ORDER BY pe.slot",
+            new { playerId });
+        return rows.Select(r => new EquipmentSlotRow(
+            Enums.ToEquipSlot((string)r.slot), (Guid)r.instance_id, (int)r.template_id)).ToList();
+    }
+
+    /// <summary>
+    /// 장착(한 트랜잭션): 소유 인스턴스를 호환 슬롯에 장착. 검증 —
+    ///   인스턴스 존재/소유, template.equip_slot == 요청 슬롯, 슬롯 미점유. 위반 시 도메인 에러.
+    /// 성공 시 그 인스턴스의 스태시 배치를 제거한다(인형 위로 이동).
+    /// </summary>
+    public async Task EquipAsync(Guid playerId, EquipSlot slot, Guid instanceId)
+    {
+        await using var db = Open();
+        await using var tx = await db.BeginTransactionAsync();
+        try
+        {
+            var inst = await db.QuerySingleOrDefaultAsync(
+                "SELECT owner_player_id, template_id FROM item_instance WHERE id = @instanceId FOR UPDATE",
+                new { instanceId }, tx);
+            if (inst is null)
+                throw new DomainException(ErrorCode.InstanceNotFound, "인스턴스를 찾을 수 없습니다.");
+            if ((Guid?)inst.owner_player_id != playerId)
+                throw new DomainException(ErrorCode.InstanceNotOwned, "해당 인스턴스를 소유하고 있지 않습니다.");
+
+            int templateId = (int)inst.template_id;
+            var equipSlot = await db.ExecuteScalarAsync<string?>(
+                "SELECT equip_slot FROM item_template WHERE id = @templateId", new { templateId }, tx);
+            if (equipSlot is null || Enums.ToEquipSlot(equipSlot) != slot)
+                throw new DomainException(ErrorCode.SlotMismatch, "이 아이템은 해당 슬롯에 장착할 수 없습니다.");
+
+            var occupied = await db.ExecuteScalarAsync<Guid?>(
+                "SELECT instance_id FROM player_equipment WHERE player_id = @playerId AND slot = @slot",
+                new { playerId, slot = slot.ToDb() }, tx);
+            if (occupied is not null)
+                throw new DomainException(ErrorCode.SlotMismatch, "슬롯이 이미 사용 중입니다. 먼저 해제하세요.");
+
+            await db.ExecuteAsync(
+                "INSERT INTO player_equipment(player_id, slot, instance_id) VALUES (@playerId, @slot, @instanceId)",
+                new { playerId, slot = slot.ToDb(), instanceId }, tx);
+            // 장착된 인스턴스는 그리드에서 제거(인형 위로 이동) → 정합화가 다시 STASH에 놓지 않도록.
+            await db.ExecuteAsync(
+                "DELETE FROM stash_placement WHERE player_id = @playerId AND kind = 'INSTANCE' AND instance_id = @instanceId",
+                new { playerId, instanceId }, tx);
+            await tx.CommitAsync();
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 해제(한 트랜잭션): 슬롯을 비운다. 해제된 인스턴스는 소유 상태로 남아 다음 GET /api/stash에서
+    /// STASH에 자동 배치된다. 백팩/리그였다면 내용물 배치도 제거해 STASH로 회수되게 한다(유실 없음).
+    /// </summary>
+    public async Task UnequipAsync(Guid playerId, EquipSlot slot)
+    {
+        await using var db = Open();
+        await using var tx = await db.BeginTransactionAsync();
+        try
+        {
+            var instanceId = await db.ExecuteScalarAsync<Guid?>(
+                "SELECT instance_id FROM player_equipment WHERE player_id = @playerId AND slot = @slot FOR UPDATE",
+                new { playerId, slot = slot.ToDb() }, tx);
+            if (instanceId is null)
+                throw new DomainException(ErrorCode.InstanceNotFound, "해당 슬롯에 장착된 아이템이 없습니다.");
+
+            // 중첩 컨테이너였다면 내용물 배치 제거(소유는 유지 → STASH로 자동 회수).
+            await db.ExecuteAsync(
+                "DELETE FROM stash_placement WHERE player_id = @playerId AND container_instance_id = @cid",
+                new { playerId, cid = instanceId.Value }, tx);
+            await db.ExecuteAsync(
+                "DELETE FROM player_equipment WHERE player_id = @playerId AND slot = @slot",
+                new { playerId, slot = slot.ToDb() }, tx);
+            await tx.CommitAsync();
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
     }
 
     // ======================================================================
@@ -818,14 +952,35 @@ public sealed class MarketRepository(string connectionString)
             if (existing is not null)
                 throw new DomainException(ErrorCode.RaidActive, "이미 진행 중인 레이드가 있습니다.");
 
-            // 2) 로드아웃 컨테이너 내용(반입 대상). 스택 먼저(template 오름차순) → 인스턴스(id 오름차순)로
-            //    일관된 락 순서를 유지한다(매도 에스크로와의 교착 방지).
-            var loadout = (await db.QueryAsync(
-                @"SELECT kind, template_id, instance_id, quantity
-                  FROM stash_placement
-                  WHERE player_id = @playerId AND container = 'LOADOUT'
-                  ORDER BY kind, template_id, instance_id",
+            // 2) 위험(at-risk) 대상 수집. 로드아웃 + 장착 슬롯(전부) + 장착된 백팩/리그의 중첩 그리드 내용.
+            //    장착 인스턴스(+백팩/리그 자체)와 그 안의 내용물, 로드아웃 아이템이 모두 위험이다.
+            var equipment = (await db.QueryAsync(
+                @"SELECT pe.slot, pe.instance_id, ii.template_id
+                  FROM player_equipment pe JOIN item_instance ii ON ii.id = pe.instance_id
+                  WHERE pe.player_id = @playerId ORDER BY pe.slot",
                 new { playerId }, tx)).ToList();
+            var equippedIds = equipment.Select(e => (Guid)e.instance_id).ToArray();
+
+            // 로드아웃 배치 + 장착된 백팩/리그의 중첩 배치.
+            var placements = (await db.QueryAsync(
+                @"SELECT container, kind, template_id, instance_id, container_instance_id, quantity
+                  FROM stash_placement
+                  WHERE player_id = @playerId
+                    AND (container = 'LOADOUT'
+                         OR (container = 'CONTAINER' AND container_instance_id = ANY(@equippedIds)))",
+                new { playerId, equippedIds }, tx)).ToList();
+
+            // 스택(로드아웃+중첩): template 오름차순 락 순서. 각 물리 컨테이너별 한 칸.
+            var stackItems = placements.Where(p => (string)p.kind == "STACK")
+                .Select(p => (Container: (string)p.container, Cid: (Guid?)p.container_instance_id,
+                              TemplateId: (int)p.template_id, Qty: (int)p.quantity))
+                .OrderBy(x => x.TemplateId).ThenBy(x => x.Container).ToList();
+
+            // 인스턴스: 중첩 그리드 내용(배치) + 장착 슬롯(백팩/리그 본체 포함). instance id 오름차순.
+            var instanceItems = placements.Where(p => (string)p.kind == "INSTANCE")
+                .Select(p => (TemplateId: (int)p.template_id, InstanceId: (Guid)p.instance_id, Slot: (string?)null))
+                .Concat(equipment.Select(e => (TemplateId: (int)e.template_id, InstanceId: (Guid)e.instance_id, Slot: (string?)(string)e.slot)))
+                .OrderBy(x => x.InstanceId).ToList();
 
             // 3) 세션 생성.
             var sessionId = Guid.NewGuid();
@@ -833,16 +988,16 @@ public sealed class MarketRepository(string connectionString)
                 "INSERT INTO raid_session(id, player_id, status) VALUES (@sessionId, @playerId, 'ACTIVE')",
                 new { sessionId, playerId }, tx);
 
-            // 4) 스택 반입: inventory_stack 차감(= 매도 에스크로 이동) + 스냅샷 + 원장 + 로드아웃 배치 제거.
-            foreach (var p in loadout.Where(x => (string)x.kind == "STACK").OrderBy(x => (int)x.template_id))
+            // 4) 스택 반입: inventory_stack 차감(= 매도 에스크로 이동) + 스냅샷 + 원장 + 해당 배치 제거.
+            foreach (var s in stackItems)
             {
-                int templateId = (int)p.template_id;
-                int qty = (int)p.quantity;
+                int templateId = s.TemplateId;
+                int qty = s.Qty;
                 var have = await db.ExecuteScalarAsync<int?>(
                     "SELECT quantity FROM inventory_stack WHERE player_id = @playerId AND template_id = @templateId FOR UPDATE",
                     new { playerId, templateId }, tx);
                 if (have is null || have < qty)
-                    throw new DomainException(ErrorCode.InsufficientQuantity, "로드아웃 스택 수량이 인벤토리 보유량을 초과합니다.");
+                    throw new DomainException(ErrorCode.InsufficientQuantity, "반입 스택 수량이 인벤토리 보유량을 초과합니다.");
                 await db.ExecuteAsync(
                     "UPDATE inventory_stack SET quantity = quantity - @qty WHERE player_id = @playerId AND template_id = @templateId",
                     new { qty, playerId, templateId }, tx);
@@ -852,20 +1007,21 @@ public sealed class MarketRepository(string connectionString)
                     new { sessionId, templateId, qty }, tx);
                 await InsertItemLedgerAsync(db, tx, playerId, StashEntryKind.Stack, templateId, null, -qty, ItemLedgerReason.RaidBrought, sessionId);
                 await db.ExecuteAsync(
-                    "DELETE FROM stash_placement WHERE player_id = @playerId AND container = 'LOADOUT' AND kind = 'STACK' AND template_id = @templateId",
-                    new { playerId, templateId }, tx);
+                    @"DELETE FROM stash_placement WHERE player_id = @playerId AND container = @container AND kind = 'STACK'
+                      AND template_id = @templateId AND container_instance_id IS NOT DISTINCT FROM @cid",
+                    new { playerId, container = s.Container, templateId, cid = s.Cid }, tx);
             }
 
-            // 5) 유니크 반입: owner=NULL(= 매도 에스크로 이동) + 스냅샷 + 원장 + 로드아웃 배치 제거.
-            foreach (var p in loadout.Where(x => (string)x.kind == "INSTANCE").OrderBy(x => (Guid)x.instance_id))
+            // 5) 유니크 반입(장착 + 중첩 내용): owner=NULL + 스냅샷 + 원장 + 배치/장착 제거.
+            foreach (var it in instanceItems)
             {
-                int templateId = (int)p.template_id;
-                Guid instanceId = (Guid)p.instance_id;
+                int templateId = it.TemplateId;
+                Guid instanceId = it.InstanceId;
                 var owner = await db.ExecuteScalarAsync<Guid?>(
                     "SELECT owner_player_id FROM item_instance WHERE id = @instanceId FOR UPDATE",
                     new { instanceId }, tx);
                 if (owner != playerId)
-                    throw new DomainException(ErrorCode.InstanceNotOwned, "로드아웃 유니크 아이템의 소유권이 유효하지 않습니다.");
+                    throw new DomainException(ErrorCode.InstanceNotOwned, "위험 유니크 아이템의 소유권이 유효하지 않습니다.");
                 await db.ExecuteAsync(
                     "UPDATE item_instance SET owner_player_id = NULL WHERE id = @instanceId",
                     new { instanceId }, tx);
@@ -874,9 +1030,14 @@ public sealed class MarketRepository(string connectionString)
                       VALUES (@sessionId, 'INSTANCE', @templateId, @instanceId, 1, 'BROUGHT')",
                     new { sessionId, templateId, instanceId }, tx);
                 await InsertItemLedgerAsync(db, tx, playerId, StashEntryKind.Instance, templateId, instanceId, -1, ItemLedgerReason.RaidBrought, sessionId);
-                await db.ExecuteAsync(
-                    "DELETE FROM stash_placement WHERE player_id = @playerId AND kind = 'INSTANCE' AND instance_id = @instanceId",
-                    new { playerId, instanceId }, tx);
+                if (it.Slot is not null)
+                    await db.ExecuteAsync(
+                        "DELETE FROM player_equipment WHERE player_id = @playerId AND slot = @slot",
+                        new { playerId, slot = it.Slot }, tx);
+                else
+                    await db.ExecuteAsync(
+                        "DELETE FROM stash_placement WHERE player_id = @playerId AND kind = 'INSTANCE' AND instance_id = @instanceId",
+                        new { playerId, instanceId }, tx);
             }
 
             var dto = await LoadRaidDtoAsync(db, tx, sessionId, playerId, RaidStatus.Active, DateTimeOffset.UtcNow, null);
@@ -920,11 +1081,11 @@ public sealed class MarketRepository(string connectionString)
             if (sessionId is null)
                 throw new DomainException(ErrorCode.RaidNotFound, "진행 중인 레이드가 없습니다.");
 
-            if (req.Kind == StashEntryKind.Stack)
+            // 전리품 종류는 템플릿의 stackable 플래그로 결정한다(요청 Kind가 아님) —
+            // 게임 서버가 {templateId, quantity}만 보내도 유니크면 인스턴스를 materialize한다(버그 수정).
+            if (stackable)
             {
-                if (!stackable)
-                    throw new DomainException(ErrorCode.StackableMismatch, "유니크 템플릿은 스택 전리품으로 추가할 수 없습니다.");
-                var qty = req.Quantity ?? 0;
+                var qty = req.Quantity ?? 1;
                 if (qty < 1 || qty > 1_000_000)
                     throw new DomainException(ErrorCode.ValidationError, "전리품 수량은 1 이상 1,000,000 이하이어야 합니다.");
                 await db.ExecuteAsync(
@@ -934,8 +1095,6 @@ public sealed class MarketRepository(string connectionString)
             }
             else
             {
-                if (stackable)
-                    throw new DomainException(ErrorCode.StackableMismatch, "스택형 템플릿은 유니크 전리품으로 추가할 수 없습니다.");
                 if (req.Durability is < 0)
                     throw new DomainException(ErrorCode.ValidationError, "내구도는 음수일 수 없습니다.");
                 var instanceId = Guid.NewGuid();
