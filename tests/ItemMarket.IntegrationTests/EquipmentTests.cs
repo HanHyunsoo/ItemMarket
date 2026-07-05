@@ -90,14 +90,14 @@ public class EquipmentTests(MarketAppFixture f)
                 .EnsureSuccessStatusCode();
     }
 
-    /// <summary>테스트 격리: 잔존 LOADOUT/중첩 배치를 지운다. 익스트랙션이 원위치로 복원하므로
-    /// 공유 플레이어의 로드아웃이 테스트 간 누적될 수 있다(소유는 유지, STASH로 정합화).</summary>
-    private async Task ClearLoadout(Guid player)
+    /// <summary>테스트 격리: 잔존 POCKETS/중첩 배치를 지운다. 익스트랙션이 원위치로 복원하므로
+    /// 공유 플레이어의 위험 컨테이너가 테스트 간 누적될 수 있다(소유는 유지, STASH로 정합화).</summary>
+    private async Task ClearAtRisk(Guid player)
     {
         await using var db = new NpgsqlConnection(_f.ConnString);
         await db.OpenAsync();
         await db.ExecuteAsync(
-            "DELETE FROM stash_placement WHERE player_id = @p AND container IN ('LOADOUT','CONTAINER')",
+            "DELETE FROM stash_placement WHERE player_id = @p AND container IN ('POCKETS','CONTAINER')",
             new { p = player });
     }
 
@@ -205,7 +205,7 @@ public class EquipmentTests(MarketAppFixture f)
     {
         var h = await _f.AuthedAs(Hotel);
         await ClearEquipment(h);
-        await ClearLoadout(Hotel);
+        await ClearAtRisk(Hotel);
 
         var helmet = await GrantInstance(Hotel, Helmet, 120);
         var backpackId = await GrantInstance(Hotel, Backpack, 100);
@@ -255,7 +255,7 @@ public class EquipmentTests(MarketAppFixture f)
     {
         var h = await _f.AuthedAs(Hotel);
         await ClearEquipment(h);
-        await ClearLoadout(Hotel);
+        await ClearAtRisk(Hotel);
 
         var helmet = await GrantInstance(Hotel, Helmet, 120);
         var backpackId = await GrantInstance(Hotel, Backpack, 100);
@@ -308,7 +308,13 @@ public class EquipmentTests(MarketAppFixture f)
     {
         var h = await _f.AuthedAs(Hotel);
         await ClearEquipment(h);
-        await ClearLoadout(Hotel);
+        await ClearAtRisk(Hotel);
+
+        // StartRaid는 스태시 밖이 완전히 비어 있으면 거부되므로(RaidNothingToDeploy),
+        // 이 loot 시나리오와 무관한 최소 장비(헬멧)를 하나 착용해 둔다.
+        var helmet = await GrantInstance(Hotel, Helmet, 120);
+        await Stash(h);
+        await Equip(h, EquipSlot.Helmet, helmet);
 
         (await Start(h)).EnsureSuccessStatusCode();
 
