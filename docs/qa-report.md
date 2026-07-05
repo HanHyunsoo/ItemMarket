@@ -68,6 +68,13 @@
 **계약 불일치 — `AddLootRequest.Kind`가 무시됨.** 서버는 `template.stackable`로 분기하고 요청의
 `Kind`를 안 본다(`:1200-1202`). 문서(`RaidDtos.cs:61-66`)는 Kind로 분기한다고 설명 → 문서/구현 불일치.
 
+**BUG D (★, 확인) — loot 시점에 `max_stack` 상한이 없음.** `AddLootAsync`는 수량을 평평한 `1..1_000_000`
+범위로만 검증(`:1205`)하고, 단일 loot 호출로 100만짜리 스택을 만들 수 있다. `max_stack` 분할은 **탈출
+배치 때(`RestoreExtractedPlacementsAsync`, `:1464-1469`)만** 적용된다. 정합성 자체는 유지되나(탈출 시
+분할·귀속), loot 진행 중 스냅샷 수량이 상한을 초과해 다중-스택 불변식과 어긋난다. (fun QA의 "무료·무한
+전리품" 문제와 결이 같음 — 애초에 loot 소스에 게이트가 없다는 점.) → loot 수량도 `max_stack` 기준
+검증/분할.
+
 **확인된 정상 동작:** 장비만 착용해도 출격 성공 / at-risk 전무 시 `RaidNothingToDeploy`(400) / 이중
 출격 차단(사전체크+부분유니크+단일활성화) / 탈출 시 반입=원위치 복원·전리품 first-fit(nested→pockets→
 stash), 안 들어가면 unplaced로 남고 손실 없음 / 사망 시 스태시 불가침 / 재수화 중복배치 없음 / 백팩
