@@ -1,3 +1,4 @@
+using ItemMarket.Contracts.Common;
 using ItemMarket.Contracts.Raid;
 
 namespace ItemMarket.Grains.Abstractions;
@@ -14,6 +15,9 @@ public interface IRaidSessionGrain : IGrainWithGuidKey
 {
     /// <summary>현재 세션 스냅샷(ACTIVE 우선, 없으면 최근 세션). 세션 이력이 없으면 null.</summary>
     Task<RaidSessionDto?> Get();
+
+    /// <summary>해결된(EXTRACTED/DIED) 과거 세션 이력을 페이지네이션 조회(아이템 스냅샷 포함).</summary>
+    Task<PagedResult<RaidHistoryEntryDto>> GetHistory(int page, int size);
 
     /// <summary>
     /// 레이드 시작: ACTIVE 세션이 없어야 한다(있으면 RaidActive). 로드아웃 아이템을 위험(at-risk)으로

@@ -1,3 +1,4 @@
+using ItemMarket.Contracts.Common;
 using ItemMarket.Contracts.Items;
 using ItemMarket.Grains.Data;
 
@@ -7,6 +8,9 @@ namespace ItemMarket.Grains.Abstractions;
 public interface IPlayerInventoryGrain : IGrainWithGuidKey
 {
     Task<InventoryDto> Get();
+
+    /// <summary>아이템 원장(item_ledger) 페이지네이션 조회(RAID_*/ADMIN_GRANT 이동 로그).</summary>
+    Task<PagedResult<ItemLedgerEntryDto>> GetLedger(int page, int size);
 
     /// <summary>스택형 매도 에스크로: 수량 차감. 부족하면 false.</summary>
     Task<bool> TryEscrowStack(int templateId, int quantity);

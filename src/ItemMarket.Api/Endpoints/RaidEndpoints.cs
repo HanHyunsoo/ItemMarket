@@ -19,6 +19,10 @@ public static class RaidEndpoints
         api.MapGet("", (ClaimsPrincipal u, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IRaidSessionGrain>(CurrentPlayer(u)).Get()));
 
+        // 레이드 이력: 해결된(EXTRACTED/DIED) 과거 세션(아이템 스냅샷 포함), 최신순 페이지네이션.
+        api.MapGet("/history", (ClaimsPrincipal u, IGrainFactory gf, int page = 1, int size = 20) =>
+            Exec(() => gf.GetGrain<IRaidSessionGrain>(CurrentPlayer(u)).GetHistory(page, size)));
+
         // 레이드 시작: 로드아웃을 위험(at-risk)으로 잠근다. ACTIVE 세션이 이미 있으면 RaidActive(409).
         api.MapPost("/start", (ClaimsPrincipal u, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IRaidSessionGrain>(CurrentPlayer(u)).StartRaid()));

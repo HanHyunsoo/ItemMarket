@@ -155,4 +155,14 @@ public static class Enums
         ItemLedgerReason.AdminGrant => "ADMIN_GRANT",
         _ => "ADMIN_GRANT"
     };
+
+    public static ItemLedgerReason ToItemLedgerReason(string r) => r switch
+    {
+        "RAID_BROUGHT" => ItemLedgerReason.RaidBrought,
+        "RAID_EXTRACT" => ItemLedgerReason.RaidExtract,
+        "RAID_LOOT" => ItemLedgerReason.RaidLoot,
+        "RAID_LOSS" => ItemLedgerReason.RaidLoss,
+        "ADMIN_GRANT" => ItemLedgerReason.AdminGrant,
+        _ => ItemLedgerReason.AdminGrant
+    };
 }

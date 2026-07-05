@@ -43,6 +43,17 @@ public sealed record RaidSessionDto(
     IReadOnlyList<RaidSessionItemDto> Items);
 
 /// <summary>
+/// 레이드 이력 한 줄(해결된 세션: EXTRACTED/DIED). 결과 화면/전적 조회용.
+/// Items는 그 세션의 반입(BROUGHT)/획득(LOOTED) 스냅샷(source + qty 포함).
+/// </summary>
+public sealed record RaidHistoryEntryDto(
+    Guid Id,
+    RaidStatus Status,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? ResolvedAt,
+    IReadOnlyList<RaidSessionItemDto> Items);
+
+/// <summary>
 /// 레이드 중 전리품 획득 시뮬레이션 요청(MVP — 실제 통합에서는 게임 서버가 호출).
 /// Kind=Stack이면 Quantity 필수(≥1). Kind=Instance이면 Quantity 무시(1자루),
 /// Durability/Attachments는 선택(미지정 시 템플릿 기본).

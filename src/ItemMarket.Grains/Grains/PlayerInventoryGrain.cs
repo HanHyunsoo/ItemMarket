@@ -1,3 +1,4 @@
+using ItemMarket.Contracts.Common;
 using ItemMarket.Contracts.Items;
 using ItemMarket.Grains.Abstractions;
 using ItemMarket.Grains.Data;
@@ -13,6 +14,9 @@ public sealed class PlayerInventoryGrain(MarketRepository repo) : Grain, IPlayer
     private Guid PlayerId => this.GetPrimaryKey();
 
     public Task<InventoryDto> Get() => repo.GetInventoryAsync(PlayerId);
+
+    public Task<PagedResult<ItemLedgerEntryDto>> GetLedger(int page, int size)
+        => repo.GetItemLedgerAsync(PlayerId, Math.Max(1, page), Math.Clamp(size, 1, 200));
 
     public Task<bool> TryEscrowStack(int templateId, int quantity) => repo.TryEscrowStackAsync(PlayerId, templateId, quantity);
 

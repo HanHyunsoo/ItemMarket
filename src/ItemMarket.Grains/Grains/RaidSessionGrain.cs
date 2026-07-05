@@ -1,3 +1,4 @@
+using ItemMarket.Contracts.Common;
 using ItemMarket.Contracts.Raid;
 using ItemMarket.Grains.Abstractions;
 using ItemMarket.Grains.Data;
@@ -16,6 +17,9 @@ public sealed class RaidSessionGrain(MarketRepository repo) : Grain, IRaidSessio
     private Guid PlayerId => this.GetPrimaryKey();
 
     public Task<RaidSessionDto?> Get() => repo.GetRaidSnapshotAsync(PlayerId);
+
+    public Task<PagedResult<RaidHistoryEntryDto>> GetHistory(int page, int size)
+        => repo.GetRaidHistoryAsync(PlayerId, Math.Max(1, page), Math.Clamp(size, 1, 200));
 
     public Task<RaidSessionDto> StartRaid() => repo.StartRaidAsync(PlayerId);
 
