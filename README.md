@@ -10,7 +10,7 @@
 append-only 원장으로 회계하고 고부하 동시성에서 **돈·아이템 보존을 테스트로 증명**합니다.
 
 `C# / .NET 10` · `Orleans` · `PostgreSQL` · `SignalR` · `Redis` · `Vue 3` ·
-**테스트 76개** · **부하 테스트로 데드락 발견 → p99 5.5× 개선**
+**테스트 95개** · **부하 테스트로 데드락 발견 → p99 5.5× 개선**
 
 > 평가자용 3줄 요약: (1) 매칭 동시성을 Orleans 단일 활성화로 **락 없이** 해결하고 "동시 매수 8건 →
 > 1건만 체결"을 테스트로 고정. (2) 에스크로 + 단일 트랜잭션 정산으로 이중판매·복제·무한발행을 차단하고
@@ -56,7 +56,7 @@ append-only 원장으로 회계하고 고부하 동시성에서 **돈·아이템
   인스턴스 간 실시간 푸시를 ON/OFF 대조로 실증.
 - **보안 · 견고성** — 감사 중 **병뚜껑 무한발행 취약점(정수 오버플로) 발견·차단**, JWT +
   리프레시 토큰(로테이션·재사용 탐지), 주문 멱등성, 레이트 리미팅.
-- **품질 · 운영** — Testcontainers 기반 통합 테스트 우선(총 76개) · CI · Docker 한 방 실행 · Swagger ·
+- **품질 · 운영** — Testcontainers 기반 통합 테스트 우선(총 95개) · CI · Docker 한 방 실행 · Swagger ·
   어드민 GM 툴 · 풀스택(Vue 3).
 
 > 면접용 Q&A·STAR 스토리·화이트보드 요약: **[`docs/interview-prep.md`](docs/interview-prep.md)**
@@ -127,12 +127,14 @@ append-only 원장으로 회계하고 고부하 동시성에서 **돈·아이템
 
 | | |
 |---|---|
-| **마켓** — 카탈로그 102종·호가창 진입 | **아이템 상세** — bid/ask 래더·체결·주문폼 |
-| ![Market](docs/screenshots/market.png) | ![Item detail](docs/screenshots/item-detail.png) |
-| **그리드 스태시** — footprint·드래그앤드롭 | **지갑** — 잔액 + append-only 원장 |
-| ![Grid](docs/screenshots/grid-stash.png) | ![Wallet](docs/screenshots/wallet.png) |
-| **운영(GM) 콘솔** — admin 전용 | **Swagger** — OpenAPI 문서 |
-| ![Admin](docs/screenshots/admin.png) | ![Swagger](docs/screenshots/swagger.png) |
+| **마켓** — 카탈로그 149종·호가창 진입 | **통합 장비(Gear)** — 스태시(12×가변)+장비 인형+주머니+리그·백팩 |
+| ![Market](docs/screenshots/market.png) | ![Gear](docs/screenshots/gear.png) |
+| **레이드 기록** — 탈출/사망·반입 vs 획득 | **아이템 상세** — bid/ask 래더·체결·주문폼 |
+| ![Records](docs/screenshots/records.png) | ![Item detail](docs/screenshots/item-detail.png) |
+| **지갑** — 잔액 + append-only 원장 | **운영(GM) 콘솔** — admin 전용 |
+| ![Wallet](docs/screenshots/wallet.png) | ![Admin](docs/screenshots/admin.png) |
+| **Swagger** — OpenAPI 문서 | |
+| ![Swagger](docs/screenshots/swagger.png) | |
 
 <sub>Vue 3 + Element Plus 다크 테마. Playwright로 재현 가능 — [`tools/screenshots`](tools/screenshots).<br/>
 추가 화면: **장비**(`web/src/views/GearView.vue` — 스태시 그리드 + 캐릭터 장비 인형(헬멧·방어구·무기 +
@@ -231,7 +233,7 @@ cd web && npm install && npm run dev         # Web http://localhost:5173
 ./scripts/seed-market.sh && ./scripts/seed-trades.sh
 
 # 테스트 (Docker만 있으면 됨 — 일회용 Postgres 자동)
-dotnet test                                  # 76개: 단위 27 + 통합 45 + 밴딩 4
+dotnet test                                  # 95개: 단위 41 + 통합 50 + 밴딩 4
 
 # 다중 실로 + Redis 실시간 데모
 ./scripts/run-cluster.sh
