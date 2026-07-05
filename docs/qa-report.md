@@ -20,10 +20,12 @@
 | 4 | 마켓 카드가 시세가 아닌 고정 `base_value` 표시 | fun | ★★ | 설계/UX |
 | 5 | `AddLoot`/`StartRaid` 응답 `StartedAt` 시계 불일치 | 기능 | ★★ | 버그(확인) |
 | 6 | 첫 세션 온보딩 부재("스프레드시트에 던져짐") | fun | ★★ | UX |
-| 7 | `GET /api/stash/container` → 500(400이어야) | 기능 | ★ | 버그(확인) |
-| 8 | 계약 문서 불일치 3건(아래 D-1~3) | 기능 | ★ | 문서 |
-| 9 | 나머지 견고성/엣지(fee_bps 상한, 이중환불 창 등) | 기능 | ★ | 견고성 |
-| 10 | 폴리시(중복 언어 네비, Stash 명칭 충돌 등) | fun | ★ | UX |
+| 7 | 멱등성 헤더가 무시됨(이 배포는 Redis 미구성 → 중복 주문 생성) | 기능 | ★★ | 버그(확인) |
+| 8 | OpenAPI가 enum을 정수로 선언(런타임은 문자열) — 생성 클라이언트 역직렬화 실패 | 기능 | ★★ | 계약(확인) |
+| 9 | `GET /api/stash/container` → 500(400이어야) | 기능 | ★ | 버그(확인) |
+| 10 | 계약 문서 불일치(Quantity 풀 의미·AddLoot.Kind·GET /api/raid 주석) | 기능 | ★ | 문서 |
+| 11 | 나머지 견고성/엣지(fee_bps 상한, 이중환불 창, 레이트리밋 임계 등) | 기능 | ★ | 견고성 |
+| 12 | 폴리시(중복 언어 네비, Stash 명칭 충돌 등) | fun | ★ | UX |
 
 > **의도된 동작(버그 아님, 문서만 손보면 됨)**: `GET /api/raid`가 ACTIVE-only(해결 후 null) — 이전에
 > 의도적으로 바꾼 계약. 인터페이스 주석이 낡았을 뿐. / 가격밴드 ON 시 밴드 격리 매칭 — 문서화된
@@ -136,6 +138,37 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 
 **주의(설계 인지):** 그레인 사전검증과 리포 변이가 별도 커넥션/트랜잭션이라 **Orleans 단일 활성화에
 안전성 의존**(TOCTOU 잠재). 현재 계약상 OK이나 reentrant 전환/리포 외부 호출 시 위험.
+
+### A-4. 인프라 · 미들웨어 · 계약 (API 전역)
+
+> 최종 취합 패스에서 라이브 검증(psql 불변식 + 실제 요청)으로 추가 확인한 항목. 이 배포는 **Redis
+> 미구성** 상태였음(멱등성·SignalR 백플레인이 무저장 폴백으로 동작) — 다중 인스턴스/프로덕션과 다름.
+
+**M2 (★★, 확인) — `Idempotency-Key`가 무시되어 중복 주문 생성.** Redis 미구성이라 `NullIdempotencyStore`가
+바인딩(`Program.cs:76-79`)되고 `TryClaimAsync`가 항상 `Claimed` 반환(중복 미탐, `IdempotencyStore.cs:84-92`).
+재현: 동일 `Idempotency-Key`로 `POST /api/orders` 2회 → 서로 다른 주문 2건 생성. 개발용 폴백으로 문서화돼
+있으나, 앱은 헤더를 광고하면서 보호는 0. → 프로덕션은 Redis 필수(무저장 폴백일 땐 헤더를 거부하거나 경고).
+
+**M3 (★★, 확인) — OpenAPI enum 계약 불일치(API 전역).** 4개 enum(`OrderSide`/`GridContainer`/
+`StashEntryKind`/`EquipSlot`)이 `swagger.json`엔 `type: integer`로 선언되지만 런타임은 PascalCase 문자열
+(`"Sell"`,`"Stash"`,`"Weapon"`,`"Active"` …)로 직렬화/반환. 입력은 int·문자열 둘 다 관대하게 받지만 응답은
+항상 문자열 → **스펙 기반 생성 클라이언트가 모든 응답 역직렬화 실패**. Swashbuckle이
+`JsonStringEnumConverter`를 반영하지 못함. → 스키마 필터로 enum을 string+`enum` 값 목록으로 노출.
+
+**L8 (★, 확인) — 레이트리밋이 사실상 안 걸림.** `PermitLimit=1000`/플레이어/10초(`RateLimiting.cs:23-24`,
+`appsettings.json:27`). 429 경로 자체는 정상(표준 봉투+Retry-After)이나 임계가 높아 실질 남용 방어로는
+의미 약함. → 운영 임계 재설정.
+
+**철회(오탐 공식 취소) — "extract 아이템 중복"은 버그 아님.** loot 스택이 `inventory_stack`과
+`stash_placement` 양쪽에 기록되지만, 전자=소유 진실·후자=그리드 위치이며 `StashGrain.ReconcileAsync`가
+다음 스태시 읽기에서 잉여 placement를 정리. 라이브 증명: invstack copy 판매로 invstack→0 후에도 raw
+`stash_placement`엔 100 남았으나 `GET /api/inventory`=0, `GET /api/stash`가 그리드를 0으로 재조정. 모든
+지출 경로(판매·출격)는 `inventory_stack`에서 차감 → 그리드 사본은 독립적으로 소비 불가. 소유 중복 없음,
+정합성 온전.
+
+**라이브 정합성 불변식(psql) 통과:** 음수 잔액/에스크로 없음, remaining=0인 OPEN 주문 없음, 인스턴스 중복
+등재 없음, max_stack 초과 스택 없음, 한 인스턴스가 2곳에 없음, 발행 총량 == 지갑+에스크로+소각(정확).
+전 과정(테스트 전·중·후) 유지.
 
 ---
 
