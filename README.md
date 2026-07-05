@@ -1,7 +1,6 @@
 # Wasteland Exchange — 아이템 거래소 (게임 서비스 백엔드)
 
-<!-- CI 배지: 원격 저장소 push 후 <OWNER>/<REPO> 를 실제 슬러그로 바꾸세요. -->
-[![CI](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml/badge.svg)](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml)
+[![CI](https://github.com/HanHyunsoo/ItemMarket/actions/workflows/ci.yml/badge.svg)](https://github.com/HanHyunsoo/ItemMarket/actions/workflows/ci.yml)
 
 > 아포칼립스 익스트랙션 슈터 장르의 **서버 권위(server-authoritative) 아이템 거래소**.
 > 주문서 매칭 엔진 · 에스크로 · 원자적 정산 · 실시간 호가 · 그리드 인벤토리 · 운영(GM) 툴을
