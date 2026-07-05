@@ -81,25 +81,32 @@ CREATE INDEX idx_item_instance_owner ON item_instance(owner_player_id);
 
 -- ----------------------------------------------------------------------------
 -- 스태시 배치(그리드 인벤토리)
---   플레이어별 N×M 스태시 위 아이템 배치. (x,y)=좌상단 칸, footprint는 템플릿의 grid_w×grid_h.
---   스택형은 (player, template) 당 한 칸(1×1), 유니크는 인스턴스별로 배치.
+--   플레이어별 컨테이너(STASH 10×12 / LOADOUT 6×8) 위 아이템 배치.
+--   (x,y)=좌상단 칸, footprint는 템플릿의 grid_w×grid_h.
+--   스택형은 (player, container, template) 당 한 칸(1×1) + 그 컨테이너에 담긴 quantity,
+--   유니크는 인스턴스별로 배치(정확히 한 컨테이너의 한 칸).
+--   컨테이너는 조직화용일 뿐 — 소유 수량의 소스오브트루스는 inventory_stack/item_instance다.
 --   서버 권위 검증: 경계 밖·겹침 금지(애플리케이션 계층에서 판정).
 -- ----------------------------------------------------------------------------
 CREATE TABLE stash_placement (
     player_id   UUID NOT NULL REFERENCES player(id),
+    container   TEXT NOT NULL DEFAULT 'STASH',         -- STASH / LOADOUT
     kind        TEXT NOT NULL,                         -- STACK / INSTANCE
     template_id INT  NOT NULL REFERENCES item_template(id),
     instance_id UUID REFERENCES item_instance(id),     -- INSTANCE일 때만
     x           INT  NOT NULL CHECK (x >= 0),
     y           INT  NOT NULL CHECK (y >= 0),
+    quantity    INT  NOT NULL DEFAULT 1 CHECK (quantity >= 1),  -- 이 컨테이너에 담긴 스택 수량(유니크는 1)
     -- 유니크 아이템은 인스턴스 단위로 유일(같은 템플릿 무기를 여러 자루 소유 가능).
+    -- 인스턴스는 정확히 한 컨테이너+한 칸에만 존재하므로 container를 포함하지 않는 전역 유일.
     CONSTRAINT uq_stash_instance UNIQUE (instance_id),
     CHECK ((kind = 'INSTANCE') = (instance_id IS NOT NULL))
 );
 CREATE INDEX idx_stash_player ON stash_placement(player_id);
--- 스택형만 (player, template) 당 1개. 부분 유니크 인덱스라 INSTANCE 행에는 적용되지 않는다
+-- 스택형만 (player, container, template) 당 1개. 부분 유니크 인덱스라 INSTANCE 행에는 적용되지 않는다
 -- (INSTANCE는 uq_stash_instance로 인스턴스별 유일 → 동일 템플릿 무기 다수 보유 허용).
-CREATE UNIQUE INDEX uq_stash_stack ON stash_placement(player_id, template_id) WHERE kind = 'STACK';
+-- container를 키에 포함 → 같은 스택 템플릿을 컨테이너마다 한 칸씩(예: STASH+LOADOUT) 나눠 놓을 수 있다.
+CREATE UNIQUE INDEX uq_stash_stack ON stash_placement(player_id, container, template_id) WHERE kind = 'STACK';
 
 -- ----------------------------------------------------------------------------
 -- 주문서(order book) & 체결(trade)
