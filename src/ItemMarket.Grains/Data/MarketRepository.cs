@@ -2,6 +2,7 @@ using Dapper;
 using ItemMarket.Contracts.Common;
 using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Orders;
+using ItemMarket.Contracts.Raid;
 using ItemMarket.Contracts.Stash;
 using ItemMarket.Contracts.Trades;
 using ItemMarket.Contracts.Wallet;
@@ -269,8 +270,8 @@ public sealed class MarketRepository(string connectionString)
         var id = Guid.NewGuid();
         var attJson = System.Text.Json.JsonSerializer.Serialize(attachments ?? []);
         var row = await db.QuerySingleAsync(
-            @"INSERT INTO item_instance(id, template_id, owner_player_id, durability, attachments)
-              VALUES (@id, @templateId, @playerId, @durability, @attJson::jsonb)
+            @"INSERT INTO item_instance(id, template_id, owner_player_id, durability, attachments, origin)
+              VALUES (@id, @templateId, @playerId, @durability, @attJson::jsonb, 'ADMIN_GRANT')
               RETURNING id, template_id, durability, attachments, created_at",
             new { id, templateId, playerId, durability, attJson });
         return new ItemInstanceDto(
@@ -775,6 +776,307 @@ public sealed class MarketRepository(string connectionString)
             throw;
         }
     }
+
+    // ======================================================================
+    //  익스트랙션 레이드 — 서비스 계층 상태기계 + 원자적 정산(단일 Postgres 트랜잭션).
+    //  매도 에스크로와 동일한 "자산 잠금" 이동을 재사용한다:
+    //    StartRaid = 로드아웃을 위험(at-risk)으로 잠금(inventory_stack 차감 / instance owner=NULL),
+    //    Extract   = 반입+획득 전량을 소유로 복귀(스택 가산 / instance owner 복원),
+    //    Die       = 위험 전량 소실(스택 미복귀 / instance tombstone). 스태시(안전)는 무관.
+    //  모든 이동은 item_ledger(append-only)에 기록한다(wallet_ledger 패턴 차용).
+    // ======================================================================
+
+    /// <summary>현재 세션 스냅샷(ACTIVE 우선, 없으면 최근 세션). 없으면 null.</summary>
+    public async Task<RaidSessionDto?> GetRaidSnapshotAsync(Guid playerId)
+    {
+        await using var db = Open();
+        var s = await db.QuerySingleOrDefaultAsync(
+            @"SELECT id, player_id, status, started_at, resolved_at
+              FROM raid_session WHERE player_id = @playerId
+              ORDER BY (status = 'ACTIVE') DESC, started_at DESC LIMIT 1",
+            new { playerId });
+        if (s is null) return null;
+        return await LoadRaidDtoAsync(db, null, (Guid)s.id, (Guid)s.player_id,
+            Enums.ToRaidStatus((string)s.status), (DateTimeOffset)s.started_at, (DateTimeOffset?)s.resolved_at);
+    }
+
+    /// <summary>
+    /// StartRaid(한 트랜잭션): ACTIVE 세션이 없어야 하며, 로드아웃 내용을 위험 스냅샷으로
+    /// 옮기고 인벤토리 가용성에서 제거(에스크로)한 뒤 로드아웃 배치를 비운다. RAID_BROUGHT 기록.
+    /// </summary>
+    public async Task<RaidSessionDto> StartRaidAsync(Guid playerId)
+    {
+        await using var db = Open();
+        await using var tx = await db.BeginTransactionAsync();
+        try
+        {
+            // 1) ACTIVE 중복 방지(부분 유니크 인덱스가 최종 강판; 명확한 에러 위해 선검사).
+            var existing = await db.ExecuteScalarAsync<Guid?>(
+                "SELECT id FROM raid_session WHERE player_id = @playerId AND status = 'ACTIVE'",
+                new { playerId }, tx);
+            if (existing is not null)
+                throw new DomainException(ErrorCode.RaidActive, "이미 진행 중인 레이드가 있습니다.");
+
+            // 2) 로드아웃 컨테이너 내용(반입 대상). 스택 먼저(template 오름차순) → 인스턴스(id 오름차순)로
+            //    일관된 락 순서를 유지한다(매도 에스크로와의 교착 방지).
+            var loadout = (await db.QueryAsync(
+                @"SELECT kind, template_id, instance_id, quantity
+                  FROM stash_placement
+                  WHERE player_id = @playerId AND container = 'LOADOUT'
+                  ORDER BY kind, template_id, instance_id",
+                new { playerId }, tx)).ToList();
+
+            // 3) 세션 생성.
+            var sessionId = Guid.NewGuid();
+            await db.ExecuteAsync(
+                "INSERT INTO raid_session(id, player_id, status) VALUES (@sessionId, @playerId, 'ACTIVE')",
+                new { sessionId, playerId }, tx);
+
+            // 4) 스택 반입: inventory_stack 차감(= 매도 에스크로 이동) + 스냅샷 + 원장 + 로드아웃 배치 제거.
+            foreach (var p in loadout.Where(x => (string)x.kind == "STACK").OrderBy(x => (int)x.template_id))
+            {
+                int templateId = (int)p.template_id;
+                int qty = (int)p.quantity;
+                var have = await db.ExecuteScalarAsync<int?>(
+                    "SELECT quantity FROM inventory_stack WHERE player_id = @playerId AND template_id = @templateId FOR UPDATE",
+                    new { playerId, templateId }, tx);
+                if (have is null || have < qty)
+                    throw new DomainException(ErrorCode.InsufficientQuantity, "로드아웃 스택 수량이 인벤토리 보유량을 초과합니다.");
+                await db.ExecuteAsync(
+                    "UPDATE inventory_stack SET quantity = quantity - @qty WHERE player_id = @playerId AND template_id = @templateId",
+                    new { qty, playerId, templateId }, tx);
+                await db.ExecuteAsync(
+                    @"INSERT INTO raid_session_item(session_id, kind, template_id, instance_id, quantity, source)
+                      VALUES (@sessionId, 'STACK', @templateId, NULL, @qty, 'BROUGHT')",
+                    new { sessionId, templateId, qty }, tx);
+                await InsertItemLedgerAsync(db, tx, playerId, StashEntryKind.Stack, templateId, null, -qty, ItemLedgerReason.RaidBrought, sessionId);
+                await db.ExecuteAsync(
+                    "DELETE FROM stash_placement WHERE player_id = @playerId AND container = 'LOADOUT' AND kind = 'STACK' AND template_id = @templateId",
+                    new { playerId, templateId }, tx);
+            }
+
+            // 5) 유니크 반입: owner=NULL(= 매도 에스크로 이동) + 스냅샷 + 원장 + 로드아웃 배치 제거.
+            foreach (var p in loadout.Where(x => (string)x.kind == "INSTANCE").OrderBy(x => (Guid)x.instance_id))
+            {
+                int templateId = (int)p.template_id;
+                Guid instanceId = (Guid)p.instance_id;
+                var owner = await db.ExecuteScalarAsync<Guid?>(
+                    "SELECT owner_player_id FROM item_instance WHERE id = @instanceId FOR UPDATE",
+                    new { instanceId }, tx);
+                if (owner != playerId)
+                    throw new DomainException(ErrorCode.InstanceNotOwned, "로드아웃 유니크 아이템의 소유권이 유효하지 않습니다.");
+                await db.ExecuteAsync(
+                    "UPDATE item_instance SET owner_player_id = NULL WHERE id = @instanceId",
+                    new { instanceId }, tx);
+                await db.ExecuteAsync(
+                    @"INSERT INTO raid_session_item(session_id, kind, template_id, instance_id, quantity, source)
+                      VALUES (@sessionId, 'INSTANCE', @templateId, @instanceId, 1, 'BROUGHT')",
+                    new { sessionId, templateId, instanceId }, tx);
+                await InsertItemLedgerAsync(db, tx, playerId, StashEntryKind.Instance, templateId, instanceId, -1, ItemLedgerReason.RaidBrought, sessionId);
+                await db.ExecuteAsync(
+                    "DELETE FROM stash_placement WHERE player_id = @playerId AND kind = 'INSTANCE' AND instance_id = @instanceId",
+                    new { playerId, instanceId }, tx);
+            }
+
+            var dto = await LoadRaidDtoAsync(db, tx, sessionId, playerId, RaidStatus.Active, DateTimeOffset.UtcNow, null);
+            await tx.CommitAsync();
+            return dto;
+        }
+        catch (PostgresException pg) when (pg.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            // 부분 유니크 인덱스 위반(드문 동시 StartRaid 레이스) → 명확한 도메인 에러.
+            await tx.RollbackAsync();
+            throw new DomainException(ErrorCode.RaidActive, "이미 진행 중인 레이드가 있습니다.");
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// AddLoot(한 트랜잭션, MVP 전리품 시뮬레이션): ACTIVE 세션에 LOOTED 위험 아이템 추가.
+    /// 스택은 스냅샷만(소유 인벤은 Extract 시 가산), 유니크는 item_instance를 owner=NULL·origin=RAID로
+    /// 즉시 생성(에스크로 상태)하고 Extract 시 소유가 부여된다.
+    /// </summary>
+    public async Task<RaidSessionDto> AddLootAsync(Guid playerId, AddLootRequest req)
+    {
+        await using var db = Open();
+
+        var tpl = await db.QuerySingleOrDefaultAsync(
+            "SELECT stackable, max_durability FROM item_template WHERE id = @id", new { id = req.TemplateId });
+        if (tpl is null)
+            throw new DomainException(ErrorCode.TemplateNotFound, "아이템 템플릿을 찾을 수 없습니다.");
+        bool stackable = (bool)tpl.stackable;
+
+        await using var tx = await db.BeginTransactionAsync();
+        try
+        {
+            var sessionId = await db.ExecuteScalarAsync<Guid?>(
+                "SELECT id FROM raid_session WHERE player_id = @playerId AND status = 'ACTIVE' FOR UPDATE",
+                new { playerId }, tx);
+            if (sessionId is null)
+                throw new DomainException(ErrorCode.RaidNotFound, "진행 중인 레이드가 없습니다.");
+
+            if (req.Kind == StashEntryKind.Stack)
+            {
+                if (!stackable)
+                    throw new DomainException(ErrorCode.StackableMismatch, "유니크 템플릿은 스택 전리품으로 추가할 수 없습니다.");
+                var qty = req.Quantity ?? 0;
+                if (qty < 1 || qty > 1_000_000)
+                    throw new DomainException(ErrorCode.ValidationError, "전리품 수량은 1 이상 1,000,000 이하이어야 합니다.");
+                await db.ExecuteAsync(
+                    @"INSERT INTO raid_session_item(session_id, kind, template_id, instance_id, quantity, source)
+                      VALUES (@sessionId, 'STACK', @templateId, NULL, @qty, 'LOOTED')",
+                    new { sessionId, templateId = req.TemplateId, qty }, tx);
+            }
+            else
+            {
+                if (stackable)
+                    throw new DomainException(ErrorCode.StackableMismatch, "스택형 템플릿은 유니크 전리품으로 추가할 수 없습니다.");
+                if (req.Durability is < 0)
+                    throw new DomainException(ErrorCode.ValidationError, "내구도는 음수일 수 없습니다.");
+                var instanceId = Guid.NewGuid();
+                var durability = req.Durability ?? (int?)tpl.max_durability;
+                var attJson = System.Text.Json.JsonSerializer.Serialize(req.Attachments ?? []);
+                // 위험 상태의 유니크(owner=NULL) 즉시 생성 — origin=RAID로 프로버넌스 표시.
+                await db.ExecuteAsync(
+                    @"INSERT INTO item_instance(id, template_id, owner_player_id, durability, attachments, origin)
+                      VALUES (@instanceId, @templateId, NULL, @durability, @attJson::jsonb, 'RAID')",
+                    new { instanceId, templateId = req.TemplateId, durability, attJson }, tx);
+                await db.ExecuteAsync(
+                    @"INSERT INTO raid_session_item(session_id, kind, template_id, instance_id, quantity, source)
+                      VALUES (@sessionId, 'INSTANCE', @templateId, @instanceId, 1, 'LOOTED')",
+                    new { sessionId, templateId = req.TemplateId, instanceId }, tx);
+            }
+
+            var dto = await LoadRaidDtoAsync(db, tx, sessionId.Value, playerId, RaidStatus.Active, DateTimeOffset.UtcNow, null);
+            await tx.CommitAsync();
+            return dto;
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Extract(한 트랜잭션): ACTIVE→EXTRACTED. 반입+획득 전량을 소유로 복귀
+    /// (스택 가산 / 유니크 owner 복원). 복귀분은 소유 상태라 다음 GET /api/stash에서 STASH 자동 배치된다.
+    /// RAID_EXTRACT(반입)/RAID_LOOT(획득) 기록.
+    /// </summary>
+    public async Task<RaidSessionDto> ExtractAsync(Guid playerId)
+        => await ResolveRaidAsync(playerId, extracted: true);
+
+    /// <summary>
+    /// Die(한 트랜잭션): ACTIVE→DIED. 위험 아이템 전량 소실(스택 미복귀 / 유니크 tombstone: owner=NULL,
+    /// origin=RAID_LOST). 스태시(안전)는 무관. RAID_LOSS 기록(손실 회계).
+    /// </summary>
+    public async Task<RaidSessionDto> DieAsync(Guid playerId)
+        => await ResolveRaidAsync(playerId, extracted: false);
+
+    private async Task<RaidSessionDto> ResolveRaidAsync(Guid playerId, bool extracted)
+    {
+        await using var db = Open();
+        await using var tx = await db.BeginTransactionAsync();
+        try
+        {
+            var session = await db.QuerySingleOrDefaultAsync(
+                @"SELECT id, started_at FROM raid_session
+                  WHERE player_id = @playerId AND status = 'ACTIVE' FOR UPDATE",
+                new { playerId }, tx);
+            if (session is null)
+                throw new DomainException(ErrorCode.RaidNotFound, "진행 중인 레이드가 없습니다.");
+            Guid sessionId = (Guid)session.id;
+            var startedAt = (DateTimeOffset)session.started_at;
+
+            var items = (await db.QueryAsync(
+                "SELECT kind, template_id, instance_id, quantity, source FROM raid_session_item WHERE session_id = @sessionId ORDER BY id",
+                new { sessionId }, tx)).ToList();
+
+            foreach (var it in items)
+            {
+                var kind = Enums.ToStashKind((string)it.kind);
+                var source = Enums.ToRaidSource((string)it.source);
+                int templateId = (int)it.template_id;
+                Guid? instanceId = (Guid?)it.instance_id;
+                int qty = (int)it.quantity;
+
+                if (extracted)
+                {
+                    var reason = source == RaidItemSource.Looted ? ItemLedgerReason.RaidLoot : ItemLedgerReason.RaidExtract;
+                    if (kind == StashEntryKind.Stack)
+                    {
+                        await UpsertStackAsync(db, tx, playerId, templateId, qty);
+                        await InsertItemLedgerAsync(db, tx, playerId, kind, templateId, null, qty, reason, sessionId);
+                    }
+                    else
+                    {
+                        // 반입/획득 유니크 모두 owner를 플레이어로 복원(획득분은 이미 origin=RAID).
+                        await db.ExecuteAsync(
+                            "UPDATE item_instance SET owner_player_id = @playerId WHERE id = @instanceId",
+                            new { playerId, instanceId }, tx);
+                        await InsertItemLedgerAsync(db, tx, playerId, kind, templateId, instanceId, 1, reason, sessionId);
+                    }
+                }
+                else // died: 소실.
+                {
+                    if (kind == StashEntryKind.Stack)
+                    {
+                        // 반입 스택은 StartRaid에서 이미 인벤 차감됨(미복귀 = 소실). 획득 스택은 인벤에 없던 것.
+                        await InsertItemLedgerAsync(db, tx, playerId, kind, templateId, null, -qty, ItemLedgerReason.RaidLoss, sessionId);
+                    }
+                    else
+                    {
+                        // tombstone: owner=NULL 유지 + origin=RAID_LOST(FK 안전한 소각 — 삭제 대신 표식).
+                        await db.ExecuteAsync(
+                            "UPDATE item_instance SET owner_player_id = NULL, origin = 'RAID_LOST' WHERE id = @instanceId",
+                            new { instanceId }, tx);
+                        await InsertItemLedgerAsync(db, tx, playerId, kind, templateId, instanceId, -1, ItemLedgerReason.RaidLoss, sessionId);
+                    }
+                }
+            }
+
+            var newStatus = extracted ? RaidStatus.Extracted : RaidStatus.Died;
+            var resolvedAt = DateTimeOffset.UtcNow;
+            await db.ExecuteAsync(
+                "UPDATE raid_session SET status = @status, resolved_at = now() WHERE id = @sessionId",
+                new { status = newStatus.ToDb(), sessionId }, tx);
+
+            var dto = await LoadRaidDtoAsync(db, tx, sessionId, playerId, newStatus, startedAt, resolvedAt);
+            await tx.CommitAsync();
+            return dto;
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>세션 + 위험 아이템 목록을 RaidSessionDto로 조립.</summary>
+    private static async Task<RaidSessionDto> LoadRaidDtoAsync(
+        NpgsqlConnection db, NpgsqlTransaction? tx, Guid sessionId, Guid playerId,
+        RaidStatus status, DateTimeOffset startedAt, DateTimeOffset? resolvedAt)
+    {
+        var items = (await db.QueryAsync(
+            "SELECT kind, template_id, instance_id, quantity, source FROM raid_session_item WHERE session_id = @sessionId ORDER BY id",
+            new { sessionId }, tx))
+            .Select(r => new RaidSessionItemDto(
+                Enums.ToStashKind((string)r.kind), (int)r.template_id, (Guid?)r.instance_id,
+                (int)r.quantity, Enums.ToRaidSource((string)r.source))).ToList();
+        return new RaidSessionDto(sessionId, playerId, status, startedAt, resolvedAt, items);
+    }
+
+    private static Task InsertItemLedgerAsync(
+        NpgsqlConnection db, NpgsqlTransaction tx, Guid playerId, StashEntryKind kind,
+        int templateId, Guid? instanceId, int deltaQty, ItemLedgerReason reason, Guid? refId)
+        => db.ExecuteAsync(
+            @"INSERT INTO item_ledger(player_id, kind, template_id, instance_id, delta_qty, reason, ref_id)
+              VALUES (@playerId, @kind, @templateId, @instanceId, @deltaQty, @reason, @refId)",
+            new { playerId, kind = kind.ToDb(), templateId, instanceId, deltaQty, reason = reason.ToDb(), refId }, tx);
 
     // ======================================================================
     //  체결 내역

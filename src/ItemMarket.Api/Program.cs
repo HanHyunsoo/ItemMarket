@@ -111,6 +111,7 @@ app.MapMarketEndpoints();
 app.MapWalletEndpoints();
 app.MapInventoryEndpoints();
 app.MapStashEndpoints();
+app.MapRaidEndpoints();
 app.MapOrderEndpoints();
 app.MapAdminEndpoints();
 

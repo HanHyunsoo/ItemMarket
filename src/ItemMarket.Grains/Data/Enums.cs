@@ -1,5 +1,6 @@
 using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Orders;
+using ItemMarket.Contracts.Raid;
 using ItemMarket.Contracts.Stash;
 using ItemMarket.Contracts.Wallet;
 
@@ -85,5 +86,37 @@ public static class Enums
         "EPIC" => ItemRarity.Epic,
         "LEGENDARY" => ItemRarity.Legendary,
         _ => ItemRarity.Common
+    };
+
+    // --- RaidStatus --------------------------------------------------------
+    public static string ToDb(this RaidStatus s) => s switch
+    {
+        RaidStatus.Active => "ACTIVE",
+        RaidStatus.Extracted => "EXTRACTED",
+        RaidStatus.Died => "DIED",
+        _ => "ACTIVE"
+    };
+
+    public static RaidStatus ToRaidStatus(string s) => s switch
+    {
+        "ACTIVE" => RaidStatus.Active,
+        "EXTRACTED" => RaidStatus.Extracted,
+        "DIED" => RaidStatus.Died,
+        _ => RaidStatus.Active
+    };
+
+    // --- RaidItemSource ----------------------------------------------------
+    public static string ToDb(this RaidItemSource s) => s == RaidItemSource.Looted ? "LOOTED" : "BROUGHT";
+    public static RaidItemSource ToRaidSource(string s) => s == "LOOTED" ? RaidItemSource.Looted : RaidItemSource.Brought;
+
+    // --- ItemLedgerReason (아이템 원장 태그) --------------------------------
+    public static string ToDb(this ItemLedgerReason r) => r switch
+    {
+        ItemLedgerReason.RaidBrought => "RAID_BROUGHT",
+        ItemLedgerReason.RaidExtract => "RAID_EXTRACT",
+        ItemLedgerReason.RaidLoot => "RAID_LOOT",
+        ItemLedgerReason.RaidLoss => "RAID_LOSS",
+        ItemLedgerReason.AdminGrant => "ADMIN_GRANT",
+        _ => "ADMIN_GRANT"
     };
 }

@@ -35,9 +35,9 @@ public static class ApiResults
         ErrorCode.Unauthorized => StatusCodes.Status401Unauthorized,
         ErrorCode.Forbidden => StatusCodes.Status403Forbidden,
         ErrorCode.PlayerNotFound or ErrorCode.TemplateNotFound or ErrorCode.InstanceNotFound
-            or ErrorCode.OrderNotFound => StatusCodes.Status404NotFound,
+            or ErrorCode.OrderNotFound or ErrorCode.RaidNotFound => StatusCodes.Status404NotFound,
         ErrorCode.RateLimited => StatusCodes.Status429TooManyRequests,
-        ErrorCode.IdempotencyInProgress => StatusCodes.Status409Conflict,
+        ErrorCode.IdempotencyInProgress or ErrorCode.RaidActive => StatusCodes.Status409Conflict,
         _ => StatusCodes.Status400BadRequest
     };
 
