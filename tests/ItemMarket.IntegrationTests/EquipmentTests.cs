@@ -90,6 +90,17 @@ public class EquipmentTests(MarketAppFixture f)
                 .EnsureSuccessStatusCode();
     }
 
+    /// <summary>테스트 격리: 잔존 LOADOUT/중첩 배치를 지운다. 익스트랙션이 원위치로 복원하므로
+    /// 공유 플레이어의 로드아웃이 테스트 간 누적될 수 있다(소유는 유지, STASH로 정합화).</summary>
+    private async Task ClearLoadout(Guid player)
+    {
+        await using var db = new NpgsqlConnection(_f.ConnString);
+        await db.OpenAsync();
+        await db.ExecuteAsync(
+            "DELETE FROM stash_placement WHERE player_id = @p AND container IN ('LOADOUT','CONTAINER')",
+            new { p = player });
+    }
+
     // ----------------------------------------------------------------------
 
     // 장착 검증: 호환 슬롯이면 성공(그리드에서 제거·인형 위로), 슬롯 불일치면 SlotMismatch(400).
@@ -194,6 +205,7 @@ public class EquipmentTests(MarketAppFixture f)
     {
         var h = await _f.AuthedAs(Hotel);
         await ClearEquipment(h);
+        await ClearLoadout(Hotel);
 
         var helmet = await GrantInstance(Hotel, Helmet, 120);
         var backpackId = await GrantInstance(Hotel, Backpack, 100);
@@ -243,6 +255,7 @@ public class EquipmentTests(MarketAppFixture f)
     {
         var h = await _f.AuthedAs(Hotel);
         await ClearEquipment(h);
+        await ClearLoadout(Hotel);
 
         var helmet = await GrantInstance(Hotel, Helmet, 120);
         var backpackId = await GrantInstance(Hotel, Backpack, 100);
@@ -274,12 +287,18 @@ public class EquipmentTests(MarketAppFixture f)
         Assert.True(await Owns(h, axe));
         Assert.Equal(beforeStack22, await StackQty(h, 22));
 
-        // 소유가 됐으니 GET /api/stash가 STASH에 자동 배치한다(슬롯은 StartRaid에서 해제됨).
+        // 익스트랙션 시맨틱: 장착 아이템은 원래 슬롯, 백팩 내용물은 원래 백팩 그리드로 복원(STASH 덤프 아님).
+        var eq = await Equipment(h);
+        Assert.Contains(eq.Slots, s => s.Slot == EquipSlot.Helmet && s.InstanceId == helmet);
+        Assert.Contains(eq.Slots, s => s.Slot == EquipSlot.Backpack && s.InstanceId == backpackId);
+        var nested = eq.Containers.Single(cnt => cnt.ContainerInstanceId == backpackId);
+        Assert.Contains(nested.Placements, p => p.InstanceId == axe && p.X == 2 && p.Y == 0);
+        Assert.Contains(nested.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 22 && p.X == 0 && p.Y == 0);
+        // STASH에는 이번 회수분이 덤프되지 않는다.
         var stash = await Stash(h);
-        Assert.Contains(stash.Placements, p => p.InstanceId == helmet);
-        Assert.Contains(stash.Placements, p => p.InstanceId == backpackId);
-        Assert.Contains(stash.Placements, p => p.InstanceId == axe);
-        Assert.Contains(stash.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 22);
+        Assert.DoesNotContain(stash.Placements, p => p.InstanceId == axe);
+
+        await ClearEquipment(h);
     }
 
     // 전리품(loot-unique): 유니크 템플릿을 loot하면 인스턴스가 materialize(origin=RAID)되고 Extract 시 소유가 부여된다.
@@ -289,6 +308,7 @@ public class EquipmentTests(MarketAppFixture f)
     {
         var h = await _f.AuthedAs(Hotel);
         await ClearEquipment(h);
+        await ClearLoadout(Hotel);
 
         (await Start(h)).EnsureSuccessStatusCode();
 

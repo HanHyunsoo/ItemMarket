@@ -251,6 +251,16 @@ CREATE TABLE raid_session_item (
     instance_id UUID,            -- INSTANCE일 때만(반입=기존 id, 획득=예약 id → Extract 시 materialize)
     quantity    INT  NOT NULL DEFAULT 1 CHECK (quantity >= 1),  -- 유니크는 1
     source      TEXT NOT NULL,   -- BROUGHT / LOOTED
+    -- ---- 원위치 복원 스냅샷(익스트랙션 시맨틱) --------------------------------
+    -- StartRaid 시점에 반입(BROUGHT) 아이템이 있던 정확한 위치를 스냅샷한다. Extract(생존) 시
+    -- 이 위치로 그대로 복원한다(스태시 자동 덤프가 아니라 로드아웃 칸/장착 슬롯/백팩·리그 내부로).
+    -- LOOTED(레이드 중 획득) 아이템은 원위치가 없어 전부 NULL이며, Extract 시 반입 공간
+    -- (장착된 백팩·리그 중첩 그리드 → LOADOUT → STASH 오버플로 순)에 first-fit으로 배치된다.
+    origin_container           TEXT,   -- STASH / LOADOUT / CONTAINER / EQUIP (BROUGHT만; LOOTED은 NULL)
+    origin_container_instance_id UUID, -- origin_container='CONTAINER'(중첩 백팩·리그 내부)일 때 그 컨테이너 인스턴스
+    origin_slot                TEXT,   -- origin_container='EQUIP'일 때 장착 슬롯(HELMET/ARMOR/WEAPON/BACKPACK/RIG)
+    origin_x                   INT,    -- 그리드 원위치(EQUIP은 NULL)
+    origin_y                   INT,
     CHECK ((kind = 'INSTANCE') = (instance_id IS NOT NULL))
 );
 CREATE INDEX idx_raid_item_session ON raid_session_item(session_id);

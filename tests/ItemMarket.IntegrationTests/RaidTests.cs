@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Json;
 using Dapper;
 using ItemMarket.Contracts.Admin;
+using ItemMarket.Contracts.Common;
+using ItemMarket.Contracts.Equipment;
 using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Orders;
 using ItemMarket.Contracts.Raid;
@@ -45,6 +47,20 @@ public class RaidTests(MarketAppFixture f)
         return g.Data!.Id;
     }
 
+    /// <summary>테스트 격리: 잔존 LOADOUT/중첩 배치를 지운다(익스트랙션이 이제 원위치로 복원하므로
+    /// 공유 플레이어의 로드아웃이 테스트 간 누적된다). 소유는 유지되어 다음 GET /api/stash에서 STASH로 정합화된다.</summary>
+    private async Task ClearLoadout(Guid player)
+    {
+        await using var db = new NpgsqlConnection(_f.ConnString);
+        await db.OpenAsync();
+        await db.ExecuteAsync(
+            "DELETE FROM stash_placement WHERE player_id = @p AND container IN ('LOADOUT','CONTAINER')",
+            new { p = player });
+    }
+
+    private static async Task<StashDto> Loadout(HttpClient c)
+        => (await Api<StashDto>(await c.GetAsync("/api/stash/loadout"))).Data!;
+
     private static async Task<InventoryDto> Inv(HttpClient c)
         => (await Api<InventoryDto>(await c.GetAsync("/api/inventory"))).Data!;
 
@@ -80,6 +96,18 @@ public class RaidTests(MarketAppFixture f)
     private static Task<HttpResponseMessage> Loot(HttpClient c, AddLootRequest req)
         => c.PostAsJsonAsync("/api/raid/loot", req, Json);
 
+    private static async Task<EquipmentDto> Equipment(HttpClient c)
+        => (await Api<EquipmentDto>(await c.GetAsync("/api/equipment"))).Data!;
+
+    private static async Task Equip(HttpClient c, EquipSlot slot, Guid id)
+        => (await c.PostAsJsonAsync("/api/equipment/equip", new EquipRequest(slot, id), Json)).EnsureSuccessStatusCode();
+
+    private static async Task ClearEquipment(HttpClient c)
+    {
+        foreach (var s in (await Equipment(c)).Slots)
+            (await c.PostAsJsonAsync("/api/equipment/unequip", new UnequipRequest(s.Slot), Json)).EnsureSuccessStatusCode();
+    }
+
     // ----------------------------------------------------------------------
 
     // StartRaid: 로드아웃 아이템이 세션(위험)으로 이동하고, 인벤에서 빠져 판매/이동 불가가 된다.
@@ -87,6 +115,7 @@ public class RaidTests(MarketAppFixture f)
     public async Task StartRaid_moves_loadout_to_session_and_locks_items()
     {
         var d = await _f.AuthedAs(Delta);
+        await ClearLoadout(Delta);
         await GrantStack(Delta, 25, 8);            // MRE(스택)
         var knife = await GrantInstance(Delta, 55, 100); // 마체테(유니크 1×3)
         await Stash(d);                            // STASH 자동 배치
@@ -133,6 +162,7 @@ public class RaidTests(MarketAppFixture f)
     public async Task Extract_conserves_brought_and_looted_items()
     {
         var d = await _f.AuthedAs(Delta);
+        await ClearLoadout(Delta);
         await GrantStack(Delta, 22, 6);            // 꿀단지(스택)
         var axe = await GrantInstance(Delta, 59, 150); // 소방도끼(유니크)
         await Stash(d);
@@ -163,10 +193,16 @@ public class RaidTests(MarketAppFixture f)
         Assert.Equal(beforeStack93 + 30, await StackQty(d, 93));
         Assert.True(await Owns(d, lootedKatana));
 
-        // 소유가 됐으니 GET /api/stash가 STASH에 자동 배치한다.
+        // 익스트랙션 시맨틱: 반입(BROUGHT) 아이템은 원위치(로드아웃 칸)로 그대로 복원된다(STASH 덤프 아님).
+        var loadout = await Loadout(d);
+        Assert.Contains(loadout.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 22 && p.X == 5 && p.Y == 0);
+        Assert.Contains(loadout.Placements, p => p.InstanceId == axe && p.X == 0 && p.Y == 0);
+        // 획득(LOOTED)은 원위치가 없어 반입 공간(백팩 없음 → LOADOUT)에 first-fit 배치된다.
+        Assert.Contains(loadout.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 93);
+        Assert.Contains(loadout.Placements, p => p.InstanceId == lootedKatana);
+        // STASH(안전)에는 이번 회수분이 덤프되지 않는다.
         var stash = await Stash(d);
-        Assert.Contains(stash.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 22);
-        Assert.Contains(stash.Placements, p => p.InstanceId == axe);
+        Assert.DoesNotContain(stash.Placements, p => p.InstanceId == axe);
     }
 
     // Die = 로드아웃만 소실: 반입 소실, 스태시(안전) 무관, 손실은 item_ledger에 기록.
@@ -174,6 +210,7 @@ public class RaidTests(MarketAppFixture f)
     public async Task Die_destroys_at_risk_only_and_stash_is_untouched()
     {
         var d = await _f.AuthedAs(Delta);
+        await ClearLoadout(Delta);
         await GrantStack(Delta, 21, 5);   // 땅콩버터 — STASH에 남길 안전 아이템(반입 안 함)
         await GrantStack(Delta, 12, 7);   // 쌀 — 반입(소실 대상)
         var hatchet = await GrantInstance(Delta, 60, 100); // 손도끼 — 반입(소실 대상)
@@ -216,6 +253,7 @@ public class RaidTests(MarketAppFixture f)
     public async Task Second_start_raid_is_rejected_while_active()
     {
         var e = await _f.AuthedAs(Echo);
+        await ClearLoadout(Echo);
         await GrantStack(Echo, 24, 3); // 건빵
         await Stash(e);
         await BringStack(e, 24, 3, 0, 0);
@@ -242,6 +280,7 @@ public class RaidTests(MarketAppFixture f)
     public async Task StartRaid_rolls_back_entirely_on_mid_settlement_failure()
     {
         var fx = await _f.AuthedAs(Foxtrot);
+        await ClearLoadout(Foxtrot);
         await GrantStack(Foxtrot, 11, 5);            // 라면
         var knife = await GrantInstance(Foxtrot, 54, 90); // 전투용 나이프
         await Stash(fx);
@@ -276,5 +315,84 @@ public class RaidTests(MarketAppFixture f)
                 "SELECT count(*) FROM item_ledger WHERE player_id = @p", new { p = Foxtrot });
             Assert.Equal(0, ledger);
         }
+    }
+
+    // Refinement 1: Extract는 원위치로 복원한다 — 로드아웃 아이템은 원래 칸, 장착 아이템은 원래 슬롯,
+    // 획득(LOOTED)은 반입 공간(백팩 없음 → LOADOUT)에. STASH 자동 덤프가 아니다.
+    [Fact]
+    public async Task Extract_restores_to_original_loadout_cell_equip_slot_and_looted_to_carried_space()
+    {
+        var d = await _f.AuthedAs(Delta);
+        await ClearLoadout(Delta);
+        await ClearEquipment(d);
+
+        // 로드아웃 아이템: 사탕(26, 스택 — 이 플레이어의 다른 테스트와 겹치지 않는 템플릿)을 (3,2)로 반입.
+        await GrantStack(Delta, 26, 4);
+        await Stash(d);
+        await BringStack(d, 26, 4, 3, 2);
+
+        // 장착 아이템: 리볼버(76, WEAPON)를 장착.
+        var revolver = await GrantInstance(Delta, 76, 400);
+        await Stash(d);
+        await Equip(d, EquipSlot.Weapon, revolver);
+
+        (await Start(d)).EnsureSuccessStatusCode();
+        // 위험 상태: 로드아웃 스택은 인벤에서 빠지고, 리볼버는 소유 아님(슬롯 비움).
+        Assert.Equal(0, await StackQty(d, 26));
+        Assert.False(await Owns(d, revolver));
+        Assert.Empty((await Equipment(d)).Slots);
+
+        // 레이드 중 획득: 스택(5.56mm 탄약 96).
+        (await Loot(d, new AddLootRequest(StashEntryKind.Stack, 96, 15))).EnsureSuccessStatusCode();
+
+        var extracted = await Api<RaidSessionDto>(await Extract(d));
+        Assert.Equal(RaidStatus.Extracted, extracted.Data!.Status);
+
+        // 로드아웃 아이템은 원래 칸(3,2)으로 복원(STASH 아님).
+        var loadout = await Loadout(d);
+        Assert.Contains(loadout.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 26 && p.X == 3 && p.Y == 2);
+        Assert.DoesNotContain((await Stash(d)).Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 26);
+
+        // 장착 아이템은 원래 슬롯(WEAPON)으로 복원.
+        Assert.Contains((await Equipment(d)).Slots, s => s.Slot == EquipSlot.Weapon && s.InstanceId == revolver);
+
+        // 획득(LOOTED)은 반입 공간(백팩 없음 → LOADOUT)에 배치.
+        Assert.Contains(loadout.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 96);
+
+        await ClearEquipment(d);
+    }
+
+    // Refinement 2: GET /api/raid/history + GET /api/inventory/ledger 읽기 엔드포인트.
+    [Fact]
+    public async Task Raid_history_and_item_ledger_read_endpoints_reflect_a_raid()
+    {
+        var e = await _f.AuthedAs(Echo);
+        await ClearLoadout(Echo);
+        await GrantStack(Echo, 24, 3);   // 건빵(반입)
+        await Stash(e);
+        await BringStack(e, 24, 3, 1, 1);
+
+        (await Start(e)).EnsureSuccessStatusCode();
+        (await Loot(e, new AddLootRequest(StashEntryKind.Stack, 94, 5))).EnsureSuccessStatusCode(); // .45 ACP 획득
+        var extracted = await Api<RaidSessionDto>(await Extract(e));
+        var sessionId = extracted.Data!.Id;
+
+        // 이력: 해결된 세션이 아이템 스냅샷(source + qty)과 함께 조회된다.
+        var hist = await Api<PagedResult<RaidHistoryEntryDto>>(await e.GetAsync("/api/raid/history?page=1&size=20"));
+        Assert.True(hist.Success);
+        var entry = hist.Data!.Items.SingleOrDefault(h => h.Id == sessionId);
+        Assert.NotNull(entry);
+        Assert.Equal(RaidStatus.Extracted, entry!.Status);
+        Assert.NotNull(entry.ResolvedAt);
+        Assert.Contains(entry.Items, i => i.TemplateId == 24 && i.Source == RaidItemSource.Brought && i.Quantity == 3);
+        Assert.Contains(entry.Items, i => i.TemplateId == 94 && i.Source == RaidItemSource.Looted && i.Quantity == 5);
+
+        // 원장: RAID_* 사유가 기록된다.
+        var ledger = await Api<PagedResult<ItemLedgerEntryDto>>(await e.GetAsync("/api/inventory/ledger?page=1&size=100"));
+        Assert.True(ledger.Success);
+        var rows = ledger.Data!.Items;
+        Assert.Contains(rows, l => l.Reason == ItemLedgerReason.RaidBrought && l.TemplateId == 24 && l.DeltaQty == -3);
+        Assert.Contains(rows, l => l.Reason == ItemLedgerReason.RaidExtract && l.TemplateId == 24 && l.DeltaQty == 3);
+        Assert.Contains(rows, l => l.Reason == ItemLedgerReason.RaidLoot && l.TemplateId == 94 && l.DeltaQty == 5);
     }
 }

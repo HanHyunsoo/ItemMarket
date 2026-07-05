@@ -961,25 +961,30 @@ public sealed class MarketRepository(string connectionString)
                 new { playerId }, tx)).ToList();
             var equippedIds = equipment.Select(e => (Guid)e.instance_id).ToArray();
 
-            // 로드아웃 배치 + 장착된 백팩/리그의 중첩 배치.
+            // 로드아웃 배치 + 장착된 백팩/리그의 중첩 배치. x,y까지 읽어 원위치 스냅샷에 쓴다.
             var placements = (await db.QueryAsync(
-                @"SELECT container, kind, template_id, instance_id, container_instance_id, quantity
+                @"SELECT container, kind, template_id, instance_id, container_instance_id, x, y, quantity
                   FROM stash_placement
                   WHERE player_id = @playerId
                     AND (container = 'LOADOUT'
                          OR (container = 'CONTAINER' AND container_instance_id = ANY(@equippedIds)))",
                 new { playerId, equippedIds }, tx)).ToList();
 
-            // 스택(로드아웃+중첩): template 오름차순 락 순서. 각 물리 컨테이너별 한 칸.
+            // 스택(로드아웃+중첩): template 오름차순 락 순서. 각 물리 컨테이너별 한 칸. 원위치(x,y) 포함.
             var stackItems = placements.Where(p => (string)p.kind == "STACK")
                 .Select(p => (Container: (string)p.container, Cid: (Guid?)p.container_instance_id,
-                              TemplateId: (int)p.template_id, Qty: (int)p.quantity))
+                              TemplateId: (int)p.template_id, Qty: (int)p.quantity,
+                              X: (int)p.x, Y: (int)p.y))
                 .OrderBy(x => x.TemplateId).ThenBy(x => x.Container).ToList();
 
-            // 인스턴스: 중첩 그리드 내용(배치) + 장착 슬롯(백팩/리그 본체 포함). instance id 오름차순.
+            // 인스턴스: 중첩 그리드 내용(배치=LOADOUT/CONTAINER 원위치) + 장착 슬롯(백팩/리그 본체 포함, EQUIP 원위치).
             var instanceItems = placements.Where(p => (string)p.kind == "INSTANCE")
-                .Select(p => (TemplateId: (int)p.template_id, InstanceId: (Guid)p.instance_id, Slot: (string?)null))
-                .Concat(equipment.Select(e => (TemplateId: (int)e.template_id, InstanceId: (Guid)e.instance_id, Slot: (string?)(string)e.slot)))
+                .Select(p => (TemplateId: (int)p.template_id, InstanceId: (Guid)p.instance_id,
+                              OriginContainer: (string)p.container, OriginCid: (Guid?)p.container_instance_id,
+                              OriginSlot: (string?)null, OriginX: (int?)(int)p.x, OriginY: (int?)(int)p.y))
+                .Concat(equipment.Select(e => (TemplateId: (int)e.template_id, InstanceId: (Guid)e.instance_id,
+                              OriginContainer: "EQUIP", OriginCid: (Guid?)null,
+                              OriginSlot: (string?)(string)e.slot, OriginX: (int?)null, OriginY: (int?)null)))
                 .OrderBy(x => x.InstanceId).ToList();
 
             // 3) 세션 생성.
@@ -1002,9 +1007,12 @@ public sealed class MarketRepository(string connectionString)
                     "UPDATE inventory_stack SET quantity = quantity - @qty WHERE player_id = @playerId AND template_id = @templateId",
                     new { qty, playerId, templateId }, tx);
                 await db.ExecuteAsync(
-                    @"INSERT INTO raid_session_item(session_id, kind, template_id, instance_id, quantity, source)
-                      VALUES (@sessionId, 'STACK', @templateId, NULL, @qty, 'BROUGHT')",
-                    new { sessionId, templateId, qty }, tx);
+                    @"INSERT INTO raid_session_item
+                        (session_id, kind, template_id, instance_id, quantity, source,
+                         origin_container, origin_container_instance_id, origin_slot, origin_x, origin_y)
+                      VALUES (@sessionId, 'STACK', @templateId, NULL, @qty, 'BROUGHT',
+                              @originContainer, @originCid, NULL, @originX, @originY)",
+                    new { sessionId, templateId, qty, originContainer = s.Container, originCid = s.Cid, originX = s.X, originY = s.Y }, tx);
                 await InsertItemLedgerAsync(db, tx, playerId, StashEntryKind.Stack, templateId, null, -qty, ItemLedgerReason.RaidBrought, sessionId);
                 await db.ExecuteAsync(
                     @"DELETE FROM stash_placement WHERE player_id = @playerId AND container = @container AND kind = 'STACK'
@@ -1026,14 +1034,27 @@ public sealed class MarketRepository(string connectionString)
                     "UPDATE item_instance SET owner_player_id = NULL WHERE id = @instanceId",
                     new { instanceId }, tx);
                 await db.ExecuteAsync(
-                    @"INSERT INTO raid_session_item(session_id, kind, template_id, instance_id, quantity, source)
-                      VALUES (@sessionId, 'INSTANCE', @templateId, @instanceId, 1, 'BROUGHT')",
-                    new { sessionId, templateId, instanceId }, tx);
+                    @"INSERT INTO raid_session_item
+                        (session_id, kind, template_id, instance_id, quantity, source,
+                         origin_container, origin_container_instance_id, origin_slot, origin_x, origin_y)
+                      VALUES (@sessionId, 'INSTANCE', @templateId, @instanceId, 1, 'BROUGHT',
+                              @originContainer, @originCid, @originSlot, @originX, @originY)",
+                    new
+                    {
+                        sessionId,
+                        templateId,
+                        instanceId,
+                        originContainer = it.OriginContainer,
+                        originCid = it.OriginCid,
+                        originSlot = it.OriginSlot,
+                        originX = it.OriginX,
+                        originY = it.OriginY
+                    }, tx);
                 await InsertItemLedgerAsync(db, tx, playerId, StashEntryKind.Instance, templateId, instanceId, -1, ItemLedgerReason.RaidBrought, sessionId);
-                if (it.Slot is not null)
+                if (it.OriginSlot is not null)
                     await db.ExecuteAsync(
                         "DELETE FROM player_equipment WHERE player_id = @playerId AND slot = @slot",
-                        new { playerId, slot = it.Slot }, tx);
+                        new { playerId, slot = it.OriginSlot }, tx);
                 else
                     await db.ExecuteAsync(
                         "DELETE FROM stash_placement WHERE player_id = @playerId AND kind = 'INSTANCE' AND instance_id = @instanceId",
@@ -1153,7 +1174,9 @@ public sealed class MarketRepository(string connectionString)
             var startedAt = (DateTimeOffset)session.started_at;
 
             var items = (await db.QueryAsync(
-                "SELECT kind, template_id, instance_id, quantity, source FROM raid_session_item WHERE session_id = @sessionId ORDER BY id",
+                @"SELECT kind, template_id, instance_id, quantity, source,
+                         origin_container, origin_container_instance_id, origin_slot, origin_x, origin_y
+                  FROM raid_session_item WHERE session_id = @sessionId ORDER BY id",
                 new { sessionId }, tx)).ToList();
 
             foreach (var it in items)
@@ -1199,6 +1222,12 @@ public sealed class MarketRepository(string connectionString)
                 }
             }
 
+            // Extract(생존): 소유 복원에 더해 원위치로 복원한다(스태시 자동 덤프가 아님).
+            //   BROUGHT은 스냅샷한 정확한 위치(로드아웃 칸/장착 슬롯/백팩·리그 내부)로,
+            //   LOOTED은 반입 공간(백팩·리그 중첩 → LOADOUT → STASH 오버플로 순)에 first-fit으로.
+            if (extracted)
+                await RestoreExtractedPlacementsAsync(db, tx, playerId, items);
+
             var newStatus = extracted ? RaidStatus.Extracted : RaidStatus.Died;
             var resolvedAt = DateTimeOffset.UtcNow;
             await db.ExecuteAsync(
@@ -1213,6 +1242,154 @@ public sealed class MarketRepository(string connectionString)
         {
             await tx.RollbackAsync();
             throw;
+        }
+    }
+
+    /// <summary>정합화용 배치 스크래치(메모리 점유 계산). Quantity는 스택 합산으로 갱신 가능.</summary>
+    private sealed class PlacementScratch(
+        string container, Guid? cid, string kind, int templateId, Guid? instanceId, int x, int y, int quantity)
+    {
+        public string Container { get; } = container;
+        public Guid? Cid { get; } = cid;
+        public string Kind { get; } = kind;
+        public int TemplateId { get; } = templateId;
+        public Guid? InstanceId { get; } = instanceId;
+        public int X { get; } = x;
+        public int Y { get; } = y;
+        public int Quantity { get; set; } = quantity;
+    }
+
+    /// <summary>
+    /// Extract 원위치 복원(같은 트랜잭션). 소유는 이미 복원된 상태이고 여기서 물리 위치를 복원한다.
+    ///   1) BROUGHT: StartRaid에서 스냅샷한 origin으로 정확히 복원 — EQUIP은 player_equipment,
+    ///      LOADOUT/CONTAINER/STASH는 stash_placement의 원래 칸(스태시 자동 덤프가 아님).
+    ///   2) LOOTED: 원위치가 없으므로 반입 공간에 first-fit 배치한다 —
+    ///      <b>장착된 백팩/리그의 중첩 그리드(슬롯 순) → LOADOUT → STASH 오버플로</b> 순.
+    ///      어디에도 안 들어가면 미배치로 남고(소유 유지), 다음 GET /api/stash에서 STASH로 정합화된다.
+    /// </summary>
+    private static async Task RestoreExtractedPlacementsAsync(
+        NpgsqlConnection db, NpgsqlTransaction tx, Guid playerId, List<dynamic> items)
+    {
+        // 1) BROUGHT 원위치 복원.
+        foreach (var it in items)
+        {
+            if (Enums.ToRaidSource((string)it.source) != RaidItemSource.Brought) continue;
+            var originContainer = (string?)it.origin_container;
+            if (originContainer is null) continue; // 방어(BROUGHT은 항상 origin 보유)
+            var kind = Enums.ToStashKind((string)it.kind);
+            int templateId = (int)it.template_id;
+            Guid? instanceId = (Guid?)it.instance_id;
+
+            if (originContainer == "EQUIP")
+            {
+                await db.ExecuteAsync(
+                    "INSERT INTO player_equipment(player_id, slot, instance_id) VALUES (@playerId, @slot, @instanceId)",
+                    new { playerId, slot = (string?)it.origin_slot, instanceId }, tx);
+                continue;
+            }
+
+            Guid? cid = (Guid?)it.origin_container_instance_id;
+            int x = (int)it.origin_x, y = (int)it.origin_y;
+            if (kind == StashEntryKind.Stack)
+                await db.ExecuteAsync(
+                    @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, container_instance_id, x, y, quantity)
+                      VALUES (@playerId, @container, 'STACK', @templateId, NULL, @cid, @x, @y, @qty)",
+                    new { playerId, container = originContainer, templateId, cid, x, y, qty = (int)it.quantity }, tx);
+            else
+                await db.ExecuteAsync(
+                    @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, container_instance_id, x, y, quantity)
+                      VALUES (@playerId, @container, 'INSTANCE', @templateId, @instanceId, @cid, @x, @y, 1)",
+                    new { playerId, container = originContainer, templateId, instanceId, cid, x, y }, tx);
+        }
+
+        // 2) LOOTED 반입 공간 배치.
+        var looted = items.Where(it => Enums.ToRaidSource((string)it.source) == RaidItemSource.Looted).ToList();
+        if (looted.Count == 0) return;
+
+        // 카탈로그 footprint + 중첩 컨테이너 크기.
+        var templates = (await db.QueryAsync(
+            "SELECT id, grid_w, grid_h, is_container, container_w, container_h FROM item_template", null, tx)).ToList();
+        var footprints = templates.ToDictionary(t => (int)t.id, t => ((int)t.grid_w, (int)t.grid_h));
+        var containerDims = templates.Where(t => (bool)t.is_container)
+            .ToDictionary(t => (int)t.id, t => ((int)t.container_w, (int)t.container_h));
+
+        // 장착된 백팩/리그(중첩 컨테이너) — 슬롯 순. 배치 우선순위의 앞쪽.
+        var equipped = (await db.QueryAsync(
+            @"SELECT pe.slot, pe.instance_id, ii.template_id
+              FROM player_equipment pe JOIN item_instance ii ON ii.id = pe.instance_id
+              WHERE pe.player_id = @playerId ORDER BY pe.slot",
+            new { playerId }, tx)).ToList();
+
+        // 배치 대상 컨테이너 우선순위: 중첩(백팩/리그, 슬롯 순) → LOADOUT → STASH.
+        var targets = new List<(string Container, Guid? Cid, int W, int H)>();
+        foreach (var e in equipped)
+            if (containerDims.TryGetValue((int)e.template_id, out var dims))
+                targets.Add(("CONTAINER", (Guid)e.instance_id, dims.Item1, dims.Item2));
+        targets.Add(("LOADOUT", null, StashGeometry.LoadoutW, StashGeometry.LoadoutH));
+        targets.Add(("STASH", null, StashGeometry.StashW, StashGeometry.StashH));
+
+        // 현재 배치(방금 복원한 BROUGHT + 남아있던 안전 배치)를 메모리로 로드해 점유 계산에 쓴다.
+        var placements = (await db.QueryAsync(
+            @"SELECT container, kind, template_id, instance_id, container_instance_id, x, y, quantity
+              FROM stash_placement WHERE player_id = @playerId",
+            new { playerId }, tx))
+            .Select(p => new PlacementScratch(
+                (string)p.container, (Guid?)p.container_instance_id, (string)p.kind,
+                (int)p.template_id, (Guid?)p.instance_id, (int)p.x, (int)p.y, (int)p.quantity))
+            .ToList();
+
+        static bool SameTarget(PlacementScratch p, (string Container, Guid? Cid, int W, int H) t)
+            => p.Container == t.Container && p.Cid == t.Cid;
+
+        foreach (var it in looted)
+        {
+            var kind = Enums.ToStashKind((string)it.kind);
+            int templateId = (int)it.template_id;
+            Guid? instanceId = (Guid?)it.instance_id;
+            int qty = (int)it.quantity;
+            var (w, h) = kind == StashEntryKind.Stack ? (1, 1) : footprints.GetValueOrDefault(templateId, (1, 1));
+
+            foreach (var t in targets)
+            {
+                // 스택은 같은 물리 컨테이너에 동일 템플릿 칸이 있으면 그 칸에 합산(유일 인덱스 준수).
+                if (kind == StashEntryKind.Stack)
+                {
+                    var merge = placements.FirstOrDefault(p =>
+                        p.Kind == "STACK" && p.TemplateId == templateId && SameTarget(p, t));
+                    if (merge is not null)
+                    {
+                        await db.ExecuteAsync(
+                            @"UPDATE stash_placement SET quantity = quantity + @qty
+                              WHERE player_id = @playerId AND container = @container AND kind = 'STACK'
+                                AND template_id = @templateId AND container_instance_id IS NOT DISTINCT FROM @cid",
+                            new { qty, playerId, container = t.Container, templateId, cid = t.Cid }, tx);
+                        merge.Quantity += qty;
+                        break;
+                    }
+                }
+
+                var occupied = placements.Where(p => SameTarget(p, t)).Select(p =>
+                {
+                    var (pw, ph) = p.Kind == "STACK" ? (1, 1) : footprints.GetValueOrDefault(p.TemplateId, (1, 1));
+                    return new Rect(p.X, p.Y, pw, ph);
+                }).ToList();
+                var fit = StashGeometry.FirstFit(t.W, t.H, occupied, w, h);
+                if (fit is null) continue;
+                var (fx, fy) = fit.Value;
+
+                if (kind == StashEntryKind.Stack)
+                    await db.ExecuteAsync(
+                        @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, container_instance_id, x, y, quantity)
+                          VALUES (@playerId, @container, 'STACK', @templateId, NULL, @cid, @x, @y, @qty)",
+                        new { playerId, container = t.Container, templateId, cid = t.Cid, x = fx, y = fy, qty }, tx);
+                else
+                    await db.ExecuteAsync(
+                        @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, container_instance_id, x, y, quantity)
+                          VALUES (@playerId, @container, 'INSTANCE', @templateId, @instanceId, @cid, @x, @y, 1)",
+                        new { playerId, container = t.Container, templateId, instanceId, cid = t.Cid, x = fx, y = fy }, tx);
+                placements.Add(new PlacementScratch(t.Container, t.Cid, kind.ToDb(), templateId, instanceId, fx, fy, qty));
+                break;
+            }
         }
     }
 
@@ -1237,6 +1414,69 @@ public sealed class MarketRepository(string connectionString)
             @"INSERT INTO item_ledger(player_id, kind, template_id, instance_id, delta_qty, reason, ref_id)
               VALUES (@playerId, @kind, @templateId, @instanceId, @deltaQty, @reason, @refId)",
             new { playerId, kind = kind.ToDb(), templateId, instanceId, deltaQty, reason = reason.ToDb(), refId }, tx);
+
+    /// <summary>
+    /// 레이드 이력(해결된 세션: EXTRACTED/DIED)을 페이지네이션으로 조회. ACTIVE는 제외한다
+    /// (진행 중 세션은 GET /api/raid로 본다). 각 세션의 아이템 스냅샷을 한 번의 쿼리로 묶어 붙인다(N+1 회피).
+    /// </summary>
+    public async Task<PagedResult<RaidHistoryEntryDto>> GetRaidHistoryAsync(Guid playerId, int page, int size)
+    {
+        await using var db = Open();
+        var total = await db.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM raid_session WHERE player_id = @playerId AND status IN ('EXTRACTED','DIED')",
+            new { playerId });
+        var sessions = (await db.QueryAsync(
+            @"SELECT id, status, started_at, resolved_at
+              FROM raid_session
+              WHERE player_id = @playerId AND status IN ('EXTRACTED','DIED')
+              ORDER BY started_at DESC, id DESC
+              LIMIT @size OFFSET @offset",
+            new { playerId, size, offset = (page - 1) * size })).ToList();
+
+        var ids = sessions.Select(s => (Guid)s.id).ToArray();
+        var itemsBySession = new Dictionary<Guid, List<RaidSessionItemDto>>();
+        if (ids.Length > 0)
+        {
+            var itemRows = await db.QueryAsync(
+                @"SELECT session_id, kind, template_id, instance_id, quantity, source
+                  FROM raid_session_item WHERE session_id = ANY(@ids) ORDER BY id",
+                new { ids });
+            foreach (var r in itemRows)
+            {
+                var sid = (Guid)r.session_id;
+                if (!itemsBySession.TryGetValue(sid, out var list))
+                    itemsBySession[sid] = list = [];
+                list.Add(new RaidSessionItemDto(
+                    Enums.ToStashKind((string)r.kind), (int)r.template_id, (Guid?)r.instance_id,
+                    (int)r.quantity, Enums.ToRaidSource((string)r.source)));
+            }
+        }
+
+        var items = sessions.Select(s => new RaidHistoryEntryDto(
+            (Guid)s.id, Enums.ToRaidStatus((string)s.status),
+            (DateTimeOffset)s.started_at, (DateTimeOffset?)s.resolved_at,
+            itemsBySession.GetValueOrDefault((Guid)s.id, []))).ToList();
+        return new PagedResult<RaidHistoryEntryDto>(items, page, size, total);
+    }
+
+    /// <summary>플레이어 아이템 원장(item_ledger, append-only)을 최신순으로 페이지네이션 조회.</summary>
+    public async Task<PagedResult<ItemLedgerEntryDto>> GetItemLedgerAsync(Guid playerId, int page, int size)
+    {
+        await using var db = Open();
+        var total = await db.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM item_ledger WHERE player_id = @playerId", new { playerId });
+        var rows = await db.QueryAsync(
+            @"SELECT id, player_id, kind, template_id, instance_id, delta_qty, reason, ref_id, created_at
+              FROM item_ledger WHERE player_id = @playerId
+              ORDER BY id DESC LIMIT @size OFFSET @offset",
+            new { playerId, size, offset = (page - 1) * size });
+        var items = rows.Select(r => new ItemLedgerEntryDto(
+            (long)r.id, (Guid)r.player_id, Enums.ToStashKind((string)r.kind),
+            (int)r.template_id, (Guid?)r.instance_id, (int)r.delta_qty,
+            Enums.ToItemLedgerReason((string)r.reason), (Guid?)r.ref_id,
+            (DateTimeOffset)r.created_at)).ToList();
+        return new PagedResult<ItemLedgerEntryDto>(items, page, size, total);
+    }
 
     // ======================================================================
     //  체결 내역

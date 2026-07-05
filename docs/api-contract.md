@@ -58,6 +58,7 @@
 | GET | `/api/wallet` | - | `WalletDto` (현재 플레이어) |
 | GET | `/api/wallet/ledger?page=&size=` | - | `PagedResult<WalletLedgerEntryDto>` |
 | GET | `/api/inventory` | - | `InventoryDto` (스택 + 유니크 인스턴스) |
+| GET | `/api/inventory/ledger?page=&size=` | - | `PagedResult<ItemLedgerEntryDto>` (아이템 이동 원장: RAID_*/ADMIN_GRANT) |
 | GET | `/api/stash` | - | `StashDto` (STASH 컨테이너, 하위호환) |
 | GET | `/api/stash/{container}` | - | `StashDto` (지정 컨테이너: `stash`\|`loadout`, 대소문자 무시) |
 | POST | `/api/stash/move` | `MoveStashItemRequest` | `StashDto` (이동 후 `ToContainer` 스냅샷) |
@@ -71,6 +72,7 @@
 | GET | `/api/orders/{id}` | - | `OrderDto` |
 | DELETE | `/api/orders/{id}` | - | `OrderDto` (취소, 에스크로 환불) |
 | GET | `/api/raid` | - | `RaidSessionDto?` (**ACTIVE 세션만 반환, 없으면 `null`**) |
+| GET | `/api/raid/history?page=&size=` | - | `PagedResult<RaidHistoryEntryDto>` (해결된 EXTRACTED/DIED 세션, 최신순) |
 | POST | `/api/raid/start` | - | `RaidSessionDto` (로드아웃을 위험으로 잠금, ACTIVE) |
 | POST | `/api/raid/loot` | `AddLootRequest` | `RaidSessionDto` (전리품 추가) |
 | POST | `/api/raid/extract` | - | `RaidSessionDto` (생존 → 전량 소유 복귀, EXTRACTED) |
@@ -166,7 +168,7 @@
 `extract`/`die`는 명시적 엔드포인트다(실제 통합에서는 게임 서버가 결과를 알린다).
 
 - **루프**: 플레이어가 **LOADOUT**을 채운다(기존 `POST /api/stash/move`) → **StartRaid** 로 로드아웃을
-  "위험(at-risk)"으로 잠근다 → **Extract**(생존, 전량 STASH로 회수) 또는 **Die**(위험 아이템 소실).
+  "위험(at-risk)"으로 잠근다 → **Extract**(생존, 전량 **원위치로 복원**) 또는 **Die**(위험 아이템 소실).
 - **상태기계**: `(없음) --start--> ACTIVE --extract--> EXTRACTED` / `ACTIVE --die--> DIED`.
   `RaidSessionDto.Status`(`Active`\|`Extracted`\|`Died`, PascalCase 직렬화).
 - **플레이어당 ACTIVE 세션 1개**: 진행 중 다시 `start`하면 `RaidActive`(**409**). DB의 부분 유니크
@@ -176,24 +178,40 @@
   `extract`/`die` 응답으로 표시한다.
 - **위험(at-risk) 범위**: 로드아웃(LOADOUT) 뿐 아니라 **장착 슬롯 전부**(헬멧/방어구/무기/백팩/리그)와
   **장착된 백팩/리그의 중첩 그리드 내용물**까지 모두 위험이다. 즉 인형 위에 걸친 것과 그 백팩 안의
-  것도 StartRaid로 잠기고, Die 시 함께 소실된다. 장착 슬롯은 StartRaid에서 비워진다(Extract 후에는
-  소유로 복귀해 STASH로 자동 배치).
+  것도 StartRaid로 잠기고, Die 시 함께 소실된다. 장착 슬롯은 StartRaid에서 비워진다(생존 시 원위치로 복원).
 - **StartRaid(원자적, 매도 에스크로와 동일한 자산 잠금 재사용)**: 위험 스택은 `inventory_stack`에서
   차감, 위험 유니크(로드아웃/장착/중첩 내용물)는 `item_instance.owner_player_id = NULL`. 로드아웃·중첩
-  배치와 장착 슬롯을 비우고 위험 스냅샷 `raid_session_item`(source=`BROUGHT`)에 기록한다. 위험 아이템은
-  인벤에서 사라지므로 **레이드 중 판매/이동/배치가 자동 거부**된다(기존 에스크로 검사가 그대로 거른다).
+  배치와 장착 슬롯을 비우고 위험 스냅샷 `raid_session_item`(source=`BROUGHT`)에 기록한다. 이때 각 반입
+  아이템의 **원위치를 함께 스냅샷**한다(`origin_container` = `STASH`/`LOADOUT`/`CONTAINER`/`EQUIP`,
+  `origin_container_instance_id`(중첩 백팩·리그), `origin_slot`(장착 슬롯), `origin_x`/`origin_y`(그리드 칸))
+  — 생존 시 정확히 그 자리로 되돌리기 위함이다. 위험 아이템은 인벤에서 사라지므로 **레이드 중 판매/이동/배치가
+  자동 거부**된다(기존 에스크로 검사가 그대로 거른다).
 - **AddLoot(MVP 시뮬레이션)**: ACTIVE 세션에 `LOOTED` 위험 아이템을 추가한다. 스택은 수량 스냅샷,
   유니크는 `item_instance`를 `owner=NULL`·`origin='RAID'`로 즉시 생성(위험 상태)한다. 소유는 Extract 시 부여.
   전리품 종류는 **요청 `Kind`가 아니라 템플릿의 `stackable` 플래그로 결정**한다 — 게임 서버가
   `{TemplateId, Quantity}`만 보내도 유니크 템플릿이면 인스턴스를 materialize한다(loot-unique 버그 수정).
   `AddLootRequest`: `Kind`(무시 가능), `TemplateId`, `Quantity`(스택), `Durability`/`Attachments`(유니크 선택).
-- **Extract = 보존**: 반입(`BROUGHT`) + 획득(`LOOTED`) 전량을 소유로 복귀(스택 가산 / 유니크 owner 복원).
-  복귀분은 **소유** 상태라 다음 `GET /api/stash`에서 STASH로 자동 배치된다. 총량 보존.
+- **Extract = 보존 + 원위치 복원**: 반입(`BROUGHT`) + 획득(`LOOTED`) 전량을 소유로 복귀(스택 가산 /
+  유니크 owner 복원)한 뒤, 물리 위치를 **한 트랜잭션 안에서** 복원한다 — STASH로 자동 덤프하지 않는다.
+  - **반입(BROUGHT)**: StartRaid에서 스냅샷한 `origin_*`으로 정확히 되돌린다 — `EQUIP`은 `player_equipment`
+    슬롯으로, `LOADOUT`/`CONTAINER`(백팩·리그 내부)/`STASH`는 `stash_placement`의 원래 칸으로 재삽입.
+    즉 생존하면 장비·로드아웃 배치가 레이드 직전 그대로 유지된다.
+  - **획득(LOOTED)**: 원위치가 없으므로 **반입 공간에 first-fit 배치**한다. 우선순위는
+    **① 장착된 백팩/리그의 중첩 그리드(슬롯 순) → ② LOADOUT → ③ STASH 오버플로**. 스택은 같은 물리
+    컨테이너에 동일 템플릿 칸이 있으면 그 칸에 수량을 합산한다. 어느 곳에도 자리가 없으면 미배치로
+    남고(소유는 유지) 다음 `GET /api/stash`에서 STASH로 정합화된다. 총량은 항상 보존.
 - **Die = 로드아웃만 소실**: 위험 아이템 전량 소각(스택 미복귀 / 유니크 tombstone: `owner=NULL`,
   `origin='RAID_LOST'`). **STASH(안전)는 무관**. 손실은 `item_ledger`(`RAID_LOSS`)에 회계된다.
 - **아이템 원장(`item_ledger`, append-only)**: 레이드 이동을 프로버넌스로 기록한다 —
   `RAID_BROUGHT`(반입, -), `RAID_EXTRACT`(회수, +), `RAID_LOOT`(획득 materialize, +), `RAID_LOSS`(소실, -).
   `wallet_ledger`의 감사 패턴을 아이템에 적용한 것(잔고 컬럼 없는 이동 로그, `ref_id`=세션 id).
+- **읽기 엔드포인트(프론트 전적/원장 화면)**:
+  - `GET /api/raid/history?page=&size=` → 해결된(EXTRACTED/DIED) 과거 세션을 최신순으로 페이지네이션.
+    각 항목(`RaidHistoryEntryDto`)은 `id`/`status`/`startedAt`/`resolvedAt`과 그 세션의 아이템 스냅샷
+    (`source`=BROUGHT/LOOTED + `quantity`)을 포함한다. ACTIVE 세션은 제외(진행 중은 `GET /api/raid`).
+  - `GET /api/inventory/ledger?page=&size=` → `item_ledger`를 최신순 페이지네이션(`ItemLedgerEntryDto`:
+    `reason`(RAID_BROUGHT/RAID_EXTRACT/RAID_LOOT/RAID_LOSS/ADMIN_GRANT), `templateId`, `instanceId?`,
+    `deltaQty`, `createdAt`).
 
 ## 멱등성 (`POST /api/orders`)
 
