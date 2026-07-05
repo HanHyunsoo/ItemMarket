@@ -1,4 +1,5 @@
 using ItemMarket.Contracts.Common;
+using ItemMarket.Contracts.Equipment;
 using ItemMarket.Contracts.Stash;
 using ItemMarket.Grains.Abstractions;
 using ItemMarket.Grains.Data;
@@ -99,6 +100,54 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
 
         var after = await repo.GetStashPlacementsAsync(PlayerId);
         return BuildSnapshot(to, after, ctx);
+    }
+
+    // ======================================================================
+    //  장비(equipment) — 슬롯 조작. 같은 grain 활성화에서 처리되어 스태시 이동/정합화와
+    //  직렬화된다(장착이 그리드 배치를 제거하고, 정합화가 다시 놓지 않도록 하는 것이 원자적).
+    // ======================================================================
+
+    public async Task<EquipmentDto> GetEquipment()
+    {
+        var ctx = await LoadAsync();
+        await ReconcileAsync(ctx);
+        return await BuildEquipmentAsync(ctx);
+    }
+
+    public async Task<EquipmentDto> Equip(EquipRequest req)
+    {
+        await repo.EquipAsync(PlayerId, req.Slot, req.InstanceId);
+        var ctx = await LoadAsync();
+        await ReconcileAsync(ctx);
+        return await BuildEquipmentAsync(ctx);
+    }
+
+    public async Task<EquipmentDto> Unequip(UnequipRequest req)
+    {
+        await repo.UnequipAsync(PlayerId, req.Slot);
+        var ctx = await LoadAsync();
+        await ReconcileAsync(ctx);
+        return await BuildEquipmentAsync(ctx);
+    }
+
+    /// <summary>장착 슬롯 + 장착된 백팩/리그의 중첩 그리드 스냅샷을 조립한다.</summary>
+    private async Task<EquipmentDto> BuildEquipmentAsync(Ctx ctx)
+    {
+        var equipment = await repo.GetEquipmentAsync(PlayerId);
+        var placements = await repo.GetStashPlacementsAsync(PlayerId);
+
+        var slots = equipment
+            .Select(e => new EquippedItemDto(e.Slot, e.InstanceId, e.TemplateId)).ToList();
+
+        var containers = new List<NestedContainerDto>();
+        foreach (var e in equipment)
+        {
+            if (!ctx.NestedDims.TryGetValue(e.InstanceId, out var dims)) continue;
+            var snap = BuildSnapshot(new ContainerRef(GridContainer.Container, e.InstanceId), placements, ctx);
+            containers.Add(new NestedContainerDto(e.InstanceId, e.TemplateId, e.Slot, dims.W, dims.H, snap.Placements));
+        }
+
+        return new EquipmentDto(PlayerId, slots, containers);
     }
 
     /// <summary>컨테이너 참조 유효성: 중첩이면 InstanceId가 있고 장착된 백팩/리그여야 한다.</summary>
