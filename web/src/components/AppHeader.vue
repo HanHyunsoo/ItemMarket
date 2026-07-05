@@ -22,9 +22,9 @@ const navItems = computed(() => {
   const base = [
     { name: 'market', label: 'Market' },
     { name: 'inventory', label: 'Stash' },
-    { name: 'stash', label: 'Grid' },
-    { name: 'loadout', label: '장비' },
+    { name: 'gear', label: '장비' },
     { name: 'raid', label: '출격' },
+    { name: 'records', label: '기록' },
     { name: 'wallet', label: 'Wallet' },
     { name: 'orders', label: 'Orders' },
   ]

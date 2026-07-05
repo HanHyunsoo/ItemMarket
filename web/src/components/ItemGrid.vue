@@ -19,8 +19,14 @@ const props = withDefaults(
     cell?: number
     /** show the overflow tray of items that didn't fit */
     showTray?: boolean
+    /**
+     * When this grid is a nested backpack/rig (container === 'Container'), the
+     * equipped container instance id it belongs to. Threaded into move payloads
+     * so the parent can address /api/stash/move's from/to ContainerInstanceId.
+     */
+    containerInstanceId?: string | null
   }>(),
-  { busy: false, cell: 46, showTray: true },
+  { busy: false, cell: 46, showTray: true, containerInstanceId: null },
 )
 
 const emit = defineEmits<{
@@ -31,8 +37,13 @@ const emit = defineEmits<{
       to: GridContainer
       x: number
       y: number
+      // Nested-container addressing: the source/target container instance ids
+      // (null unless that side is a 'Container').
+      fromInstanceId: string | null
+      toInstanceId: string | null
     },
   ]
+  inspect: [placement: StashPlacementDto]
 }>()
 
 const catalog = useCatalogStore()
@@ -86,9 +97,19 @@ function nameOf(p: StashPlacementDto): string {
 // Whether the dragged placement fits at (x, y): in-bounds + no overlap with any
 // *other* placement already in this grid. For a cross-grid drop the incoming
 // item isn't in this grid, so every placement is treated as an obstacle.
+function isSameGrid(p: StashPlacementDto): boolean {
+  if (p.container !== container.value) return false
+  // Two distinct nested containers both report container === 'Container' — they're
+  // the same grid only if the container instance matches too.
+  if (container.value === 'Container') {
+    return (p.containerInstanceId ?? null) === (props.containerInstanceId ?? null)
+  }
+  return true
+}
+
 function isValid(p: StashPlacementDto, x: number, y: number): boolean {
   if (x < 0 || y < 0 || x + p.w > gridW.value || y + p.h > gridH.value) return false
-  const sameGrid = p.container === container.value
+  const sameGrid = isSameGrid(p)
   const self = keyOf(p)
   for (const o of placements.value) {
     if (sameGrid && keyOf(o) === self) continue
@@ -143,9 +164,17 @@ function onDrop(e: DragEvent): void {
   if (!drag || !t || !t.valid) return
   const from = drag.placement.container
   const to = container.value
-  // no-op reposition
-  if (from === to && drag.placement.x === t.x && drag.placement.y === t.y) return
-  emit('move', { placement: drag.placement, from, to, x: t.x, y: t.y })
+  // no-op reposition (same grid, same cell)
+  if (isSameGrid(drag.placement) && drag.placement.x === t.x && drag.placement.y === t.y) return
+  emit('move', {
+    placement: drag.placement,
+    from,
+    to,
+    x: t.x,
+    y: t.y,
+    fromInstanceId: drag.placement.containerInstanceId ?? null,
+    toInstanceId: props.containerInstanceId ?? null,
+  })
 }
 
 function onDragEnd(): void {
@@ -175,12 +204,13 @@ function onDragEnd(): void {
         v-for="p in placements"
         :key="keyOf(p)"
         class="tile"
-        :class="{ dragging: activeDrag && activeDrag.placement.container === container && keyOf(activeDrag.placement) === keyOf(p) }"
+        :class="{ dragging: activeDrag && isSameGrid(activeDrag.placement) && keyOf(activeDrag.placement) === keyOf(p) }"
         :style="tileStyle(p)"
         :title="nameOf(p)"
         draggable="true"
         @dragstart="onDragStart($event, p)"
         @dragend="onDragEnd"
+        @click="emit('inspect', p)"
       >
         <img class="pixel tile-sprite" :src="icon(p)" :alt="nameOf(p)" draggable="false" />
         <span v-if="p.kind === 'Stack' && p.quantity > 1" class="qty mono">×{{ p.quantity }}</span>
@@ -191,7 +221,13 @@ function onDragEnd(): void {
     <template v-if="showTray && unplaced.length">
       <p class="tray-note wx-muted mono">Grid full — {{ unplaced.length }} item(s) waiting for space.</p>
       <div class="tray">
-        <div v-for="p in unplaced" :key="keyOf(p)" class="tray-item" :title="nameOf(p)">
+        <div
+          v-for="p in unplaced"
+          :key="keyOf(p)"
+          class="tray-item"
+          :title="nameOf(p)"
+          @click="emit('inspect', p)"
+        >
           <ItemSprite
             :icon="catalog.get(p.templateId)?.icon"
             :category="catalog.get(p.templateId)?.category"
@@ -289,6 +325,7 @@ function onDragEnd(): void {
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-r-sm);
   padding: 4px;
+  cursor: pointer;
 }
 .tray-qty {
   position: absolute;

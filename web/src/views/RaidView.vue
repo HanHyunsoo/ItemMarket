@@ -119,7 +119,7 @@ async function onExtract(): Promise<void> {
   try {
     outcome.value = await raidApi.extract()
     raid.value = null
-    toastSuccess('탈출 성공 — 아이템이 창고로 귀속되었습니다.')
+    toastSuccess('탈출 성공 — 장비는 제자리로 복귀, 전리품은 회수되었습니다.')
     await afterResolve()
   } catch (err) {
     if (err instanceof ApiClientError && err.apiError.code === 'RaidNotFound') {
@@ -214,7 +214,10 @@ function goLoadout(): void {
         <div class="deploy-brief">
           <span class="wx-section-title">출격 브리핑</span>
           <ul class="brief-list">
-            <li><span class="wx-buy">탈출(Extract)</span> — 반입 + 획득 아이템이 창고로 귀속</li>
+            <li>
+              <span class="wx-buy">탈출(Extract)</span> — 반입 장비는 원래 자리(장비/로드아웃)로 복귀,
+              획득 전리품은 회수
+            </li>
             <li><span class="wx-sell">사망(Die)</span> — 반입 + 획득 아이템 전부 소실 (창고는 안전)</li>
           </ul>
         </div>
@@ -324,7 +327,7 @@ function goLoadout(): void {
           <div class="outcome-sub mono">
             {{
               outcome.status === 'Extracted'
-                ? 'EXTRACTED · 아이템 귀속됨'
+                ? 'EXTRACTED · 장비 제자리 복귀 · 전리품 회수'
                 : 'KILLED IN ACTION · 아이템 소실됨'
             }}
           </div>
@@ -354,7 +357,7 @@ function goLoadout(): void {
         </div>
 
         <p v-if="outcome.status === 'Extracted'" class="outcome-note mono">
-          획득/반입 아이템은 이제 <strong>창고(Stash)</strong>에 있습니다.
+          반입 장비는 <strong>원래 자리(장비·로드아웃)</strong>로 복귀했고, 전리품은 회수되었습니다.
         </p>
         <p v-else class="outcome-note mono">창고(Stash)의 아이템은 안전합니다.</p>
 

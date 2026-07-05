@@ -20,19 +20,24 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/InventoryView.vue'),
   },
   {
-    path: '/stash',
-    name: 'stash',
-    component: () => import('@/views/StashView.vue'),
+    // Unified inventory + equipment (stash grid + character doll + nested grids
+    // + carry loadout). Absorbs the old separate Loadout screen.
+    path: '/gear',
+    name: 'gear',
+    component: () => import('@/views/GearView.vue'),
   },
-  {
-    path: '/loadout',
-    name: 'loadout',
-    component: () => import('@/views/LoadoutView.vue'),
-  },
+  // Legacy paths → unified gear screen.
+  { path: '/stash', redirect: { name: 'gear' } },
+  { path: '/loadout', redirect: { name: 'gear' } },
   {
     path: '/raid',
     name: 'raid',
     component: () => import('@/views/RaidView.vue'),
+  },
+  {
+    path: '/records',
+    name: 'records',
+    component: () => import('@/views/RaidHistoryView.vue'),
   },
   {
     path: '/wallet',
