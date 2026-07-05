@@ -1,3 +1,4 @@
+using ItemMarket.Contracts.Stash;
 using ItemMarket.Grains.Data;
 using Xunit;
 
@@ -5,20 +6,42 @@ namespace ItemMarket.UnitTests;
 
 /// <summary>
 /// StashGeometry 순수 기하 로직(DB/Orleans 무관). 경계·겹침·first-fit을 핀 고정.
-/// 그리드는 GridW=10, GridH=12 고정.
+/// 여기서는 STASH 컨테이너(10×12)를 기준으로 검증한다.
 /// </summary>
 public class StashGeometryTests
 {
+    private const GridContainer Stash = GridContainer.Stash;
+
+    // ---- Dims --------------------------------------------------------------
+
+    [Fact]
+    public void Dims_returns_per_container_size()
+    {
+        Assert.Equal((10, 12), StashGeometry.Dims(GridContainer.Stash));
+        Assert.Equal((6, 8), StashGeometry.Dims(GridContainer.Loadout));
+    }
+
     // ---- InBounds ----------------------------------------------------------
 
     [Fact]
     public void InBounds_accepts_top_left_1x1()
-        => Assert.True(StashGeometry.InBounds(new Rect(0, 0, 1, 1)));
+        => Assert.True(StashGeometry.InBounds(Stash, new Rect(0, 0, 1, 1)));
 
     [Fact]
     public void InBounds_accepts_footprint_flush_to_bottom_right()
         // x+w=10, y+h=12 로 경계에 정확히 맞닿는 배치는 유효.
-        => Assert.True(StashGeometry.InBounds(new Rect(6, 10, 4, 2)));
+        => Assert.True(StashGeometry.InBounds(Stash, new Rect(6, 10, 4, 2)));
+
+    [Fact]
+    public void InBounds_respects_smaller_loadout_grid()
+    {
+        // LOADOUT은 6×8 — STASH에서 유효한 (6,10,4,2)도 LOADOUT에선 경계 밖.
+        Assert.False(StashGeometry.InBounds(GridContainer.Loadout, new Rect(6, 10, 4, 2)));
+        // AK-47 4×2는 LOADOUT 바닥 우하단(2,6)에 딱 맞는다: x+w=6, y+h=8.
+        Assert.True(StashGeometry.InBounds(GridContainer.Loadout, new Rect(2, 6, 4, 2)));
+        // x=3이면 x+w=7 > 6 → 경계 밖.
+        Assert.False(StashGeometry.InBounds(GridContainer.Loadout, new Rect(3, 6, 4, 2)));
+    }
 
     [Theory]
     [InlineData(-1, 0, 1, 1)]   // x 음수
@@ -30,7 +53,7 @@ public class StashGeometryTests
     [InlineData(0, 0, 0, 1)]    // w<1
     [InlineData(0, 0, 1, 0)]    // h<1
     public void InBounds_rejects_out_of_grid(int x, int y, int w, int h)
-        => Assert.False(StashGeometry.InBounds(new Rect(x, y, w, h)));
+        => Assert.False(StashGeometry.InBounds(Stash, new Rect(x, y, w, h)));
 
     // ---- Overlaps ----------------------------------------------------------
 
@@ -59,14 +82,14 @@ public class StashGeometryTests
 
     [Fact]
     public void FirstFit_returns_top_left_when_empty()
-        => Assert.Equal((0, 0), StashGeometry.FirstFit([], 1, 1));
+        => Assert.Equal((0, 0), StashGeometry.FirstFit(Stash, [], 1, 1));
 
     [Fact]
     public void FirstFit_scans_left_to_right_then_down()
     {
         // (0,0) 1×1 점유 → 다음 1×1은 (1,0).
         var occupied = new[] { new Rect(0, 0, 1, 1) };
-        Assert.Equal((1, 0), StashGeometry.FirstFit(occupied, 1, 1));
+        Assert.Equal((1, 0), StashGeometry.FirstFit(Stash, occupied, 1, 1));
     }
 
     [Fact]
@@ -74,7 +97,7 @@ public class StashGeometryTests
     {
         // 첫 행 전체(y=0)를 폭 10으로 막으면 4×2 무기는 (0,1)부터 들어간다.
         var occupied = new[] { new Rect(0, 0, 10, 1) };
-        Assert.Equal((0, 1), StashGeometry.FirstFit(occupied, 4, 2));
+        Assert.Equal((0, 1), StashGeometry.FirstFit(Stash, occupied, 4, 2));
     }
 
     [Fact]
@@ -82,7 +105,7 @@ public class StashGeometryTests
     {
         // 그리드 전체(10×12)를 한 사각형으로 덮으면 1×1도 못 들어간다.
         var occupied = new[] { new Rect(0, 0, 10, 12) };
-        Assert.Null(StashGeometry.FirstFit(occupied, 1, 1));
+        Assert.Null(StashGeometry.FirstFit(Stash, occupied, 1, 1));
     }
 
     [Fact]
@@ -90,9 +113,9 @@ public class StashGeometryTests
     {
         // 각 행 왼쪽 7칸을 막으면 남는 폭은 3 → 4폭 무기는 배치 불가(null).
         var occupied = new[] { new Rect(0, 0, 7, 12) };
-        Assert.Null(StashGeometry.FirstFit(occupied, 4, 2));
+        Assert.Null(StashGeometry.FirstFit(Stash, occupied, 4, 2));
         // 하지만 1×1은 (7,0)에 들어간다 — 로직이 폭을 정확히 존중함을 확인.
-        Assert.Equal((7, 0), StashGeometry.FirstFit(occupied, 1, 1));
+        Assert.Equal((7, 0), StashGeometry.FirstFit(Stash, occupied, 1, 1));
     }
 
     [Fact]
@@ -102,6 +125,6 @@ public class StashGeometryTests
         // 실제: candidate (2,0,2,2) 는 (3,0,2,2)와 겹침 → 다음 후보들…
         // 남는 첫 자리는 (5,0) (x[5,7)은 두 점유와 무관).
         var occupied = new[] { new Rect(0, 0, 2, 2), new Rect(3, 0, 2, 2) };
-        Assert.Equal((5, 0), StashGeometry.FirstFit(occupied, 2, 2));
+        Assert.Equal((5, 0), StashGeometry.FirstFit(Stash, occupied, 2, 2));
     }
 }
