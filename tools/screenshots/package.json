@@ -5,7 +5,8 @@
   "description": "Playwright capture script for Wasteland Exchange README screenshots.",
   "type": "module",
   "scripts": {
-    "shots": "node capture.mjs"
+    "shots": "node capture.mjs",
+    "gifs": "node capture-gifs.mjs"
   },
   "dependencies": {
     "playwright": "^1.48.0"
