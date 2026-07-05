@@ -101,8 +101,12 @@ export interface InventoryDto {
 // ---- Stash (spatial grid inventory) ----
 // A placement occupies a w×h footprint at top-left cell (x, y).
 export type StashItemKind = 'Stack' | 'Instance'
+// Which grid a placement lives in. STASH is 10×12, LOADOUT is 6×8.
+// Serialized PascalCase; the GET route segment is the lowercase form.
+export type GridContainer = 'Stash' | 'Loadout'
 
 export interface StashPlacementDto {
+  container: GridContainer
   kind: StashItemKind
   templateId: number
   instanceId?: string | null
@@ -115,6 +119,7 @@ export interface StashPlacementDto {
 
 export interface StashDto {
   playerId: string
+  container: GridContainer
   gridW: number
   gridH: number
   placements: StashPlacementDto[]
@@ -127,6 +132,11 @@ export interface MoveStashItemRequest {
   instanceId?: string | null
   x: number
   y: number
+  fromContainer: GridContainer
+  toContainer: GridContainer
+  // Stacks may move a partial amount; omit/null moves the whole stack.
+  // Instances always move whole.
+  quantity?: number | null
 }
 
 // ---- Wallet ----
