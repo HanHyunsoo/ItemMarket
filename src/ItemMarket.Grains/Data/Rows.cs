@@ -39,11 +39,6 @@ public sealed record OrderRow(
 /// <summary>유니크 인스턴스 에스크로 시도 결과.</summary>
 public enum EscrowInstanceOutcome { Ok, NotFound, NotOwned, TemplateMismatch }
 
-/// <summary>
-/// 멱등성 레코드 조회 결과. Exists=행 존재 여부, ResponseJson=저장된 응답(처리중이면 null).
-/// </summary>
-public sealed record IdempotencyLookup(bool Exists, string? ResponseJson);
-
 /// <summary>리프레시 토큰 행(해시 컬럼은 제외 — 조회는 해시로만 한다).</summary>
 public sealed record RefreshTokenRow(Guid Id, Guid PlayerId, DateTime ExpiresAt, bool Revoked);
 

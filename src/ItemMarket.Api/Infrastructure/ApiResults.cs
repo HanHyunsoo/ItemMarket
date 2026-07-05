@@ -67,57 +67,56 @@ public static class ApiResults
     /// 멱등성 실행: Idempotency-Key 헤더가 있을 때 사용. (player, key) 슬롯을 청구해
     /// 원본이면 action을 실행하고 직렬화된 응답을 저장 후 반환, 중복이면 저장된 응답을
     /// 그대로 반환한다(아직 처리중이면 409). 실패 시 슬롯을 비워 재시도를 허용한다.
+    /// 저장소는 <see cref="IIdempotencyStore"/>(Redis 또는 무저장 Null)이다.
     /// </summary>
     public static async Task<IResult> ExecIdempotent<T>(
-        MarketRepository repo, ClaimsPrincipal user, string key, Func<Task<T>> action)
+        IIdempotencyStore store, ClaimsPrincipal user, string key, Func<Task<T>> action)
     {
         Guid pid;
         try { pid = CurrentPlayer(user); }
         catch (DomainException ex) { return Results.Json(ApiResponse<T>.Fail(ex.Code, ex.Message), statusCode: StatusFor(ex.Code)); }
 
-        // 슬롯 청구(원자적). 실패하면 이미 존재하는 요청.
-        var claimed = await repo.TryClaimIdempotencyAsync(pid, key);
-        if (!claimed)
+        // 슬롯 청구(원자적).
+        var claim = await store.TryClaimAsync(pid, key);
+        switch (claim.Status)
         {
-            var existing = await repo.GetIdempotencyAsync(pid, key);
-            if (existing.ResponseJson is null)
-            {
-                // 원본이 아직 처리중(response=NULL) → 재실행하지 않고 409로 알린다.
+            case IdempotencyStatus.InProgress:
+                // 원본이 아직 처리중 → 재실행하지 않고 409로 알린다.
                 return Results.Json(
                     ApiResponse<T>.Fail(ErrorCode.IdempotencyInProgress, "동일 Idempotency-Key 요청이 처리 중입니다. 잠시 후 재시도하세요."),
                     statusCode: StatusFor(ErrorCode.IdempotencyInProgress));
-            }
-            // 저장된 원본 응답을 바이트 그대로 반환(중복 주문 없음).
-            return Results.Content(existing.ResponseJson, "application/json", statusCode: StatusCodes.Status200OK);
+            case IdempotencyStatus.Completed:
+                // 저장된 원본 응답을 바이트 그대로 반환(중복 주문 없음).
+                return Results.Content(claim.ResponseJson!, "application/json", statusCode: StatusCodes.Status200OK);
         }
 
-        // 원본: action 실행 후 성공 응답을 저장.
+        // 원본(Claimed): action 실행 후 성공 응답을 저장.
         try
         {
             var data = await action();
             var envelope = ApiResponse<T>.Ok(data);
             var json = JsonSerializer.Serialize(envelope, JsonOptions);
-            await repo.StoreIdempotencyResponseAsync(pid, key, json);
+            await store.StoreResponseAsync(pid, key, json);
             return Results.Content(json, "application/json", statusCode: StatusCodes.Status200OK);
         }
         catch (DomainException ex)
         {
             // 실패는 저장하지 않는다 — 슬롯을 비워 같은 키로 재시도 가능하게.
-            await SafeReleaseAsync(repo, pid, key);
+            await SafeReleaseAsync(store, pid, key);
             return Results.Json(ApiResponse<T>.Fail(ex.Code, ex.Message), statusCode: StatusFor(ex.Code));
         }
         catch (Exception ex)
         {
             Logger?.LogError(ex, "처리되지 않은 예외(멱등)");
-            await SafeReleaseAsync(repo, pid, key);
+            await SafeReleaseAsync(store, pid, key);
             return Results.Json(ApiResponse<T>.Fail(ErrorCode.Unknown, "서버 내부 오류가 발생했습니다."),
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }
 
-    private static async Task SafeReleaseAsync(MarketRepository repo, Guid pid, string key)
+    private static async Task SafeReleaseAsync(IIdempotencyStore store, Guid pid, string key)
     {
-        try { await repo.ReleaseIdempotencyAsync(pid, key); }
+        try { await store.ReleaseAsync(pid, key); }
         catch (Exception ex) { Logger?.LogError(ex, "멱등 슬롯 해제 실패 (player={PlayerId}, key={Key})", pid, key); }
     }
 }

@@ -551,52 +551,6 @@ public sealed class MarketRepository(string connectionString)
     }
 
     // ======================================================================
-    //  멱등성(Idempotency) — 주문 등록 재시도/중복 제출 방어
-    //  (player_id, key) 당 한 행. INSERT ON CONFLICT DO NOTHING 으로 원자적 청구.
-    // ======================================================================
-
-    /// <summary>(player, key) 슬롯을 청구한다. 새로 삽입되면 true(원본), 이미 있으면 false(중복).</summary>
-    public async Task<bool> TryClaimIdempotencyAsync(Guid playerId, string key)
-    {
-        await using var db = Open();
-        var rows = await db.ExecuteAsync(
-            @"INSERT INTO idempotency_record(player_id, key, response)
-              VALUES (@playerId, @key, NULL)
-              ON CONFLICT (player_id, key) DO NOTHING",
-            new { playerId, key });
-        return rows == 1;
-    }
-
-    /// <summary>저장된 응답 JSON을 읽는다. 행이 없으면(이론상 불가) null, 아직 처리중이면 response=NULL.</summary>
-    public async Task<IdempotencyLookup> GetIdempotencyAsync(Guid playerId, string key)
-    {
-        await using var db = Open();
-        var row = await db.QuerySingleOrDefaultAsync(
-            "SELECT response::text AS response FROM idempotency_record WHERE player_id = @playerId AND key = @key",
-            new { playerId, key });
-        if (row is null) return new IdempotencyLookup(false, null);
-        return new IdempotencyLookup(true, (string?)row.response);
-    }
-
-    /// <summary>원본 요청 완료 후 직렬화된 응답 JSON을 저장한다.</summary>
-    public async Task StoreIdempotencyResponseAsync(Guid playerId, string key, string responseJson)
-    {
-        await using var db = Open();
-        await db.ExecuteAsync(
-            "UPDATE idempotency_record SET response = @responseJson::jsonb WHERE player_id = @playerId AND key = @key",
-            new { playerId, key, responseJson });
-    }
-
-    /// <summary>원본 처리가 실패하면 슬롯을 비워 재시도를 허용한다.</summary>
-    public async Task ReleaseIdempotencyAsync(Guid playerId, string key)
-    {
-        await using var db = Open();
-        await db.ExecuteAsync(
-            "DELETE FROM idempotency_record WHERE player_id = @playerId AND key = @key AND response IS NULL",
-            new { playerId, key });
-    }
-
-    // ======================================================================
     //  리프레시 토큰 — 저장/조회/로테이션/폐기 (원문 대신 SHA-256 해시 저장)
     // ======================================================================
 

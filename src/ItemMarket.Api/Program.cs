@@ -4,6 +4,7 @@ using ItemMarket.Api.Hubs;
 using ItemMarket.Api.Infrastructure;
 using ItemMarket.Grains.Data;
 using ItemMarket.Grains.Grains;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -64,7 +65,24 @@ var signalR = builder.Services.AddSignalR().AddJsonProtocol(o =>
 });
 var redisConn = cfg["Redis:ConnectionString"];
 if (!string.IsNullOrWhiteSpace(redisConn))
+{
     signalR.AddStackExchangeRedis(redisConn);
+    // 멱등성 저장소가 쓸 멀티플렉서를 싱글턴으로 등록(SignalR 백플레인과는 별도 연결).
+    builder.Services.AddSingleton<IConnectionMultiplexer>(ConnectionMultiplexer.Connect(redisConn));
+}
+
+// 멱등성 저장소: Redis 구성 시 RedisIdempotencyStore(TTL=Idempotency:TtlMinutes, 기본 60),
+// 아니면 무저장 Null(헤더 무시 → 단일 인스턴스 개발에서 주문이 평소대로 등록됨).
+if (string.IsNullOrWhiteSpace(redisConn))
+{
+    builder.Services.AddSingleton<IIdempotencyStore, NullIdempotencyStore>();
+}
+else
+{
+    var ttl = TimeSpan.FromMinutes(cfg.GetValue("Idempotency:TtlMinutes", 60));
+    builder.Services.AddSingleton<IIdempotencyStore>(sp =>
+        new RedisIdempotencyStore(sp.GetRequiredService<IConnectionMultiplexer>(), ttl));
+}
 
 builder.Services.AddSingleton<IMarketNotifier, MarketNotifier>();
 

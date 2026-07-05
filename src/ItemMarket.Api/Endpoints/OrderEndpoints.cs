@@ -16,7 +16,7 @@ public static class OrderEndpoints
         var api = app.MapGroup("/api").RequireAuthorization().WithTags("Orders");
 
         api.MapPost("/orders", (PlaceOrderRequest req, ClaimsPrincipal u, IGrainFactory gf,
-            IMarketNotifier notifier, MarketRepository repo, HttpContext ctx) =>
+            IMarketNotifier notifier, IIdempotencyStore idem, HttpContext ctx) =>
         {
             // 실제 주문 등록 + 매칭 + 실시간 발행. 멱등/일반 경로가 공유한다.
             async Task<PlaceOrderResult> Place()
@@ -33,7 +33,7 @@ public static class OrderEndpoints
             var key = ctx.Request.Headers["Idempotency-Key"].ToString();
             return string.IsNullOrWhiteSpace(key)
                 ? Exec(Place)
-                : ExecIdempotent(repo, u, key.Trim(), Place);
+                : ExecIdempotent(idem, u, key.Trim(), Place);
         }).RequireRateLimiting(RateLimiting.OrdersPolicy);
 
         api.MapGet("/orders", (ClaimsPrincipal u, MarketRepository repo) =>
