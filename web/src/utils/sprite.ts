@@ -1,29 +1,8 @@
 import type { ItemCategory } from '@/api/types'
 
-// The 14 sprite files that actually exist in public/sprites.
-const AVAILABLE = new Set([
-  'ammo_box',
-  'ammo_shell',
-  'equip_armor',
-  'equip_backpack',
-  'equip_helmet',
-  'equip_rig',
-  'food_can',
-  'food_snack',
-  'food_water',
-  'gun_pistol',
-  'gun_rifle',
-  'gun_shotgun',
-  'med_bandage',
-  'med_kit',
-  'med_pills',
-  'melee_axe',
-  'melee_bat',
-  'melee_knife',
-])
-
-// Some catalog templates reference icon keys with no dedicated sprite
-// (ammo_arrow, ammo_bolt, ammo_flare). Fall back to a representative sprite.
+// Every catalog template has icon = code, and tools/gen-sprites.mjs emits one
+// sprite per code into public/sprites/. So a truthy icon maps 1:1 to a file.
+// CATEGORY_FALLBACK only covers the undefined/edge case (missing icon).
 const CATEGORY_FALLBACK: Record<ItemCategory, string> = {
   Food: 'food_can',
   Medical: 'med_kit',
@@ -34,7 +13,7 @@ const CATEGORY_FALLBACK: Record<ItemCategory, string> = {
 }
 
 export function spriteUrl(icon: string | undefined, category?: ItemCategory): string {
-  if (icon && AVAILABLE.has(icon)) return `/sprites/${icon}.svg`
+  if (icon) return `/sprites/${icon}.svg`
   if (category) return `/sprites/${CATEGORY_FALLBACK[category]}.svg`
   return '/sprites/ammo_box.svg'
 }
