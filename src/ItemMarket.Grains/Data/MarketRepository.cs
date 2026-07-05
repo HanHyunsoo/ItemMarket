@@ -786,14 +786,15 @@ public sealed class MarketRepository(string connectionString)
     //  모든 이동은 item_ledger(append-only)에 기록한다(wallet_ledger 패턴 차용).
     // ======================================================================
 
-    /// <summary>현재 세션 스냅샷(ACTIVE 우선, 없으면 최근 세션). 없으면 null.</summary>
+    /// <summary>현재 ACTIVE 레이드 세션 스냅샷. 활성 세션이 없으면 null(계약: null = 진행 중 레이드 없음).
+    /// 해결된(EXTRACTED/DIED) 세션은 반환하지 않는다 — 결과 화면은 extract/die 응답으로 표시한다.</summary>
     public async Task<RaidSessionDto?> GetRaidSnapshotAsync(Guid playerId)
     {
         await using var db = Open();
         var s = await db.QuerySingleOrDefaultAsync(
             @"SELECT id, player_id, status, started_at, resolved_at
-              FROM raid_session WHERE player_id = @playerId
-              ORDER BY (status = 'ACTIVE') DESC, started_at DESC LIMIT 1",
+              FROM raid_session WHERE player_id = @playerId AND status = 'ACTIVE'
+              LIMIT 1",
             new { playerId });
         if (s is null) return null;
         return await LoadRaidDtoAsync(db, null, (Guid)s.id, (Guid)s.player_id,
