@@ -4,7 +4,7 @@
 `ApiResponse<T>`(`Success` / `Data` / `Error`)로 감싼다. 열거형은 문자열로 직렬화한다.
 
 > **인터랙티브 문서(Swagger/OpenAPI)**: API를 띄운 뒤 [`/swagger`](http://localhost:5080/swagger)
-> 에서 모든 엔드포인트를 그룹(Auth/Market/Wallet/Orders/Stash/Inventory/Raid/Admin)별로 보고 직접
+> 에서 모든 엔드포인트를 그룹(Auth/Market/Wallet/Orders/Stash/Equipment/Inventory/Raid/Admin)별로 보고 직접
 > 호출할 수 있다. 우측 상단 **Authorize** 에 로그인으로 받은 액세스 토큰을 넣으면 JWT Bearer로
 > 보호된 엔드포인트를 시험할 수 있다.
 
@@ -54,13 +54,16 @@
 
 | 메서드 | 경로 | 바디 | 응답 `Data` |
 |---|---|---|---|
-| GET | `/api/catalog` | - | `ItemTemplateDto[]` (아이템 마스터 102종) |
+| GET | `/api/catalog` | - | `ItemTemplateDto[]` (아이템 마스터 106종: 기본 102 + 장비(GEAR) 4) |
 | GET | `/api/wallet` | - | `WalletDto` (현재 플레이어) |
 | GET | `/api/wallet/ledger?page=&size=` | - | `PagedResult<WalletLedgerEntryDto>` |
 | GET | `/api/inventory` | - | `InventoryDto` (스택 + 유니크 인스턴스) |
 | GET | `/api/stash` | - | `StashDto` (STASH 컨테이너, 하위호환) |
 | GET | `/api/stash/{container}` | - | `StashDto` (지정 컨테이너: `stash`\|`loadout`, 대소문자 무시) |
 | POST | `/api/stash/move` | `MoveStashItemRequest` | `StashDto` (이동 후 `ToContainer` 스냅샷) |
+| GET | `/api/equipment` | - | `EquipmentDto` (장착 슬롯 + 장착된 백팩/리그의 중첩 그리드) |
+| POST | `/api/equipment/equip` | `EquipRequest` | `EquipmentDto` (장착 후 스냅샷) |
+| POST | `/api/equipment/unequip` | `UnequipRequest` | `EquipmentDto` (해제 후 스냅샷) |
 | GET | `/api/market/{templateId}/book` | - | `OrderBookSnapshotDto` (호가창) |
 | GET | `/api/market/{templateId}/trades?page=&size=` | - | `PagedResult<TradeDto>` (체결 내역) |
 | POST | `/api/orders` | `PlaceOrderRequest` | `PlaceOrderResult` (잔여 주문 + 즉시 체결분) |
@@ -100,13 +103,16 @@
 - **부분 체결**: 남은 물량은 호가창에 잔존(`PartiallyFilled`).
 - **수수료**: 체결 시 판매 대금의 `fee_bps`(기본 5%)를 판매자 수령액에서 차감·소각(sink).
 
-## 그리드 스태시 규칙 (컨테이너: STASH / LOADOUT)
+## 그리드 스태시 규칙 (컨테이너: STASH / LOADOUT / CONTAINER)
 
-- **컨테이너 2종**: 플레이어당 두 개의 그리드가 있다.
+- **컨테이너 종류**: 플레이어당 고정 그리드 2종 + 장착된 백팩/리그의 중첩 그리드(가변 개수).
   - `STASH` = 안전 보관소 **10×12**. 소유 아이템의 기본 보관 위치.
   - `LOADOUT` = 레이드에 들고 나가는 칸 **6×8**. 비어서 시작하며 이동(반입/반출)으로만 채워진다.
-  - 크기는 `StashDto.GridW/GridH`, 어느 컨테이너인지는 `StashDto.Container`(`Stash`\|`Loadout`).
-  - 각 배치(`StashPlacementDto`)도 `Container`를 갖는다. 열거값은 PascalCase로 직렬화.
+  - `CONTAINER` = 장착된 백팩/리그의 **내부(중첩) 그리드**. 크기는 그 컨테이너 인스턴스의
+    template(`container_w × container_h`, 예: 백팩 5×5·리그 4×3). 특정 컨테이너 인스턴스를 가리키므로
+    이동 요청·배치에 `ContainerInstanceId`(장착된 백팩/리그의 인스턴스 id)가 함께 필요하다.
+  - 크기는 `StashDto.GridW/GridH`, 어느 컨테이너인지는 `StashDto.Container`(`Stash`\|`Loadout`\|`Container`).
+  - 각 배치(`StashPlacementDto`)도 `Container`와(중첩이면) `ContainerInstanceId`를 갖는다. 열거값은 PascalCase로 직렬화.
 - **footprint**: 아이템은 좌상단 `(x,y)`에서 템플릿의 `grid_w × grid_h` 칸을 차지한다.
   스택형(FOOD/MEDICAL/AMMO)은 컨테이너당 **1×1** 한 칸(+그 컨테이너에 담긴 `Quantity`),
   유니크(MELEE/GUN)는 인스턴스별로 템플릿 footprint(예: AK-47 4×2)를 차지한다.
@@ -132,6 +138,26 @@
   - 유니크 인스턴스는 항상 통째로 이동하며 `Quantity`는 무시된다.
   - 필드(`FromContainer`/`ToContainer`/`Quantity`)는 모두 선택적이며 기본값은 STASH/STASH/전체라,
     기존 단일-스태시 이동 호출과 호환된다.
+  - **중첩 컨테이너(백팩/리그) 반입·반출·재배치**: `From/ToContainer=Container`로 두고,
+    `From/ToContainerInstanceId`에 그 컨테이너(장착된 백팩/리그) 인스턴스 id를 지정한다. 경계는 그
+    컨테이너의 `container_w × container_h`로 검증하고, 겹침은 **같은 컨테이너 인스턴스** 안의 다른
+    배치만 대상으로 한다. 총 소유량은 여전히 보존된다(중첩 배치도 조직화일 뿐).
+
+## 장비 (`/api/equipment/*`)
+
+- **슬롯 5종**(`EquipSlot`, PascalCase): `Helmet` / `Armor` / `Weapon` / `Backpack` / `Rig`.
+  슬롯마다 정확히 한 인스턴스만 장착(`player_equipment`). `GUN` 카테고리는 `Weapon` 슬롯.
+- **장착(`POST /api/equipment/equip`, `EquipRequest{Slot, InstanceId}`)**: 서버 권위 검증 —
+  인스턴스 소유 + `template.equip_slot == Slot` + 슬롯 미점유. 불일치·점유·미소유 시 각각 명확한
+  코드로 거부한다(슬롯 불일치/점유 → `SlotMismatch` **400**, 미소유 → `InstanceNotOwned`, 없음 → `InstanceNotFound` **404**).
+  장착된 인스턴스는 그리드에서 빠져(인형 위로 이동) 자동 배치 대상에서 제외된다.
+- **해제(`POST /api/equipment/unequip`, `UnequipRequest{Slot}`)**: 슬롯을 비운다. 해제 아이템(및
+  백팩/리그였다면 그 내용물)은 **소유** 상태로 남아 다음 `GET /api/stash`에서 STASH로 자동 회수된다(유실 없음).
+- **`GET /api/equipment` → `EquipmentDto`**: `Slots`(슬롯→`EquippedItemDto{Slot,InstanceId,TemplateId}`) +
+  `Containers`(장착된 백팩/리그의 중첩 그리드 `NestedContainerDto{ContainerInstanceId, TemplateId, Slot,
+  GridW, GridH, Placements}`). 중첩 그리드에 아이템을 넣고 빼는 것은 위의 `/api/stash/move`(`Container` 참조)로 한다.
+- **동시성**: 장비 조작은 스태시와 **같은 grain(키=playerId)** 에서 처리되어 이동·정합화와 직렬화된다
+  (장착이 그리드 배치를 제거하고 정합화가 다시 놓지 않도록 하는 것이 원자적).
 
 ## 익스트랙션 레이드 (`/api/raid/*`)
 
@@ -148,13 +174,19 @@
 - **`GET /api/raid`**: **ACTIVE 세션만** 스냅샷으로 반환하고, 진행 중 레이드가 없으면 `null`이다
   (계약: `null` = 진행 중 레이드 없음). 해결된(EXTRACTED/DIED) 세션은 반환하지 않는다 — 결과 화면은
   `extract`/`die` 응답으로 표시한다.
-- **StartRaid(원자적, 매도 에스크로와 동일한 자산 잠금 재사용)**: 로드아웃 스택은 `inventory_stack`에서
-  차감, 유니크는 `item_instance.owner_player_id = NULL`. 로드아웃 배치를 비우고 위험 스냅샷
-  `raid_session_item`(source=`BROUGHT`)에 기록한다. 위험 아이템은 인벤에서 사라지므로 **레이드 중
-  판매/이동/배치가 자동 거부**된다(기존 에스크로 검사가 그대로 거른다).
+- **위험(at-risk) 범위**: 로드아웃(LOADOUT) 뿐 아니라 **장착 슬롯 전부**(헬멧/방어구/무기/백팩/리그)와
+  **장착된 백팩/리그의 중첩 그리드 내용물**까지 모두 위험이다. 즉 인형 위에 걸친 것과 그 백팩 안의
+  것도 StartRaid로 잠기고, Die 시 함께 소실된다. 장착 슬롯은 StartRaid에서 비워진다(Extract 후에는
+  소유로 복귀해 STASH로 자동 배치).
+- **StartRaid(원자적, 매도 에스크로와 동일한 자산 잠금 재사용)**: 위험 스택은 `inventory_stack`에서
+  차감, 위험 유니크(로드아웃/장착/중첩 내용물)는 `item_instance.owner_player_id = NULL`. 로드아웃·중첩
+  배치와 장착 슬롯을 비우고 위험 스냅샷 `raid_session_item`(source=`BROUGHT`)에 기록한다. 위험 아이템은
+  인벤에서 사라지므로 **레이드 중 판매/이동/배치가 자동 거부**된다(기존 에스크로 검사가 그대로 거른다).
 - **AddLoot(MVP 시뮬레이션)**: ACTIVE 세션에 `LOOTED` 위험 아이템을 추가한다. 스택은 수량 스냅샷,
   유니크는 `item_instance`를 `owner=NULL`·`origin='RAID'`로 즉시 생성(위험 상태)한다. 소유는 Extract 시 부여.
-  `AddLootRequest`: `Kind`(`Stack`\|`Instance`), `TemplateId`, `Quantity`(스택 필수), `Durability`/`Attachments`(유니크 선택).
+  전리품 종류는 **요청 `Kind`가 아니라 템플릿의 `stackable` 플래그로 결정**한다 — 게임 서버가
+  `{TemplateId, Quantity}`만 보내도 유니크 템플릿이면 인스턴스를 materialize한다(loot-unique 버그 수정).
+  `AddLootRequest`: `Kind`(무시 가능), `TemplateId`, `Quantity`(스택), `Durability`/`Attachments`(유니크 선택).
 - **Extract = 보존**: 반입(`BROUGHT`) + 획득(`LOOTED`) 전량을 소유로 복귀(스택 가산 / 유니크 owner 복원).
   복귀분은 **소유** 상태라 다음 `GET /api/stash`에서 STASH로 자동 배치된다. 총량 보존.
 - **Die = 로드아웃만 소실**: 위험 아이템 전량 소각(스택 미복귀 / 유니크 tombstone: `owner=NULL`,
@@ -192,5 +224,5 @@
 
 `ValidationError` · `PlayerNotFound` · `TemplateNotFound` · `InstanceNotFound` ·
 `InstanceNotOwned` · `InsufficientFunds` · `InsufficientQuantity` · `OrderNotFound` ·
-`OrderNotOwned` · `OrderAlreadyClosed` · `StackableMismatch` · `PlacementInvalid` ·
-`RateLimited`(429) · `IdempotencyInProgress`(409) · `RaidActive`(409) · `RaidNotFound`(404)
+`OrderNotOwned` · `OrderAlreadyClosed` · `StackableMismatch` · `SlotMismatch`(장비 슬롯 불일치/점유) ·
+`PlacementInvalid` · `RateLimited`(429) · `IdempotencyInProgress`(409) · `RaidActive`(409) · `RaidNotFound`(404)

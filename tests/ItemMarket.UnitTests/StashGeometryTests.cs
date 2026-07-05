@@ -127,4 +127,36 @@ public class StashGeometryTests
         var occupied = new[] { new Rect(0, 0, 2, 2), new Rect(3, 0, 2, 2) };
         Assert.Equal((5, 0), StashGeometry.FirstFit(Stash, occupied, 2, 2));
     }
+
+    // ---- 중첩 컨테이너(동적 크기) — 백팩 5×5 / 리그 4×3 등 template 기반 그리드 -----------
+
+    [Fact]
+    public void InBounds_dynamic_dims_respects_nested_container_size()
+    {
+        // 리그 4×3: (3,2,1,1)은 딱 맞고(경계 flush), (4,0,1,1)은 폭 초과, (0,3,1,1)은 높이 초과.
+        Assert.True(StashGeometry.InBounds(4, 3, new Rect(3, 2, 1, 1)));
+        Assert.False(StashGeometry.InBounds(4, 3, new Rect(4, 0, 1, 1)));
+        Assert.False(StashGeometry.InBounds(4, 3, new Rect(0, 3, 1, 1)));
+    }
+
+    [Fact]
+    public void InBounds_dynamic_dims_rejects_footprint_crossing_edge()
+    {
+        // 백팩 5×5: 손도끼(1×2)를 (4,4)에 두면 y+h=6 > 5 → 경계 밖.
+        Assert.False(StashGeometry.InBounds(5, 5, new Rect(4, 4, 1, 2)));
+        // (4,3)이면 y+h=5 로 딱 맞는다.
+        Assert.True(StashGeometry.InBounds(5, 5, new Rect(4, 3, 1, 2)));
+    }
+
+    [Fact]
+    public void FirstFit_dynamic_dims_scans_within_nested_grid()
+    {
+        // 백팩 5×5의 첫 행을 폭 5로 막으면 다음 1×1은 (0,1).
+        var occupied = new[] { new Rect(0, 0, 5, 1) };
+        Assert.Equal((0, 1), StashGeometry.FirstFit(5, 5, occupied, 1, 1));
+    }
+
+    [Fact]
+    public void FirstFit_dynamic_dims_returns_null_when_nested_grid_full()
+        => Assert.Null(StashGeometry.FirstFit(4, 3, [new Rect(0, 0, 4, 3)], 1, 1));
 }

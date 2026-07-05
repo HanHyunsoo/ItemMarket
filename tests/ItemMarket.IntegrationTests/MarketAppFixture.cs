@@ -26,6 +26,9 @@ public sealed class MarketAppFixture : IAsyncLifetime
     public static readonly Guid Delta = Guid.Parse("44444444-4444-4444-4444-444444444444");
     public static readonly Guid Echo = Guid.Parse("55555555-5555-5555-5555-555555555555");
     public static readonly Guid Foxtrot = Guid.Parse("66666666-6666-6666-6666-666666666666");
+    // 장비(equipment)/중첩 컨테이너 전용 시드 플레이어 — 시작 인벤 비어있음(테스트 격리용).
+    public static readonly Guid Golf = Guid.Parse("77777777-7777-7777-7777-777777777777");
+    public static readonly Guid Hotel = Guid.Parse("88888888-8888-8888-8888-888888888888");
 
     public static readonly JsonSerializerOptions Json = new()
     {
