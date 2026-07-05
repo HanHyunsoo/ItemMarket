@@ -25,6 +25,8 @@ public enum ItemRarity
 /// <summary>
 /// 아이템 마스터(카탈로그). 시드 데이터로 고정. Stackable=true면 수량 기반,
 /// false면 개별 인스턴스(내구도·부착물) 기반. Icon은 픽셀 스프라이트 키.
+/// MaxStack=한 칸(스택)에 쌓을 수 있는 최대 수량(카테고리 기본값: AMMO 60 / FOOD 10 / MEDICAL 5,
+/// 유니크는 1). 초과분은 새 스택으로 분리된다.
 /// </summary>
 public sealed record ItemTemplateDto(
     int Id,
@@ -41,7 +43,8 @@ public sealed record ItemTemplateDto(
     Equipment.EquipSlot? EquipSlot = null,
     bool IsContainer = false,
     int? ContainerW = null,
-    int? ContainerH = null);
+    int? ContainerH = null,
+    int MaxStack = 1);
 
 /// <summary>유니크 인스턴스(무기/방어구). 내구도·부착물 보유.</summary>
 public sealed record ItemInstanceDto(

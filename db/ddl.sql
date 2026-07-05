@@ -20,6 +20,8 @@ BEGIN;
 CREATE TABLE player (
     id           UUID PRIMARY KEY,
     display_name TEXT NOT NULL,
+    -- 스태시 크기: 가로는 12로 고정(코드 상수), 세로(행 수)만 플레이어별 가변 → 향후 업그레이드 대비.
+    stash_rows   INT NOT NULL DEFAULT 60 CHECK (stash_rows BETWEEN 1 AND 500),
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -54,6 +56,9 @@ CREATE TABLE item_template (
     base_value     BIGINT  NOT NULL,   -- 참고 시세(병뚜껑). 시드/어드민 가이드용
     grid_w         INT     NOT NULL DEFAULT 1 CHECK (grid_w BETWEEN 1 AND 6),  -- 스태시 footprint 폭(칸)
     grid_h         INT     NOT NULL DEFAULT 1 CHECK (grid_h BETWEEN 1 AND 6),  -- 스태시 footprint 높이(칸)
+    -- max_stack: 한 칸(스택)에 쌓을 수 있는 최대 수량. 아래 시드에서 카테고리별로 채운다
+    --   (AMMO 60 / FOOD 10 / MEDICAL 5, 유니크·기본 1). 초과분은 새 스택으로 분리된다.
+    max_stack      INT     NOT NULL DEFAULT 1 CHECK (max_stack >= 1),
     -- ---- 장비(equipment) / 중첩 컨테이너(nested-grid) 확장 ----------------------
     -- equip_slot: 장착 슬롯(HELMET/ARMOR/WEAPON/BACKPACK/RIG). NULL이면 장착 불가.
     --   슬롯별로 정확히 한 인스턴스만 장착(player_equipment). GUN 카테고리는 WEAPON 슬롯.
@@ -92,21 +97,21 @@ CREATE INDEX idx_item_instance_owner ON item_instance(owner_player_id);
 
 -- ----------------------------------------------------------------------------
 -- 스태시 배치(그리드 인벤토리)
---   플레이어별 컨테이너(STASH 10×12 / LOADOUT 6×8) 위 아이템 배치.
+--   플레이어별 컨테이너(STASH 가로12·세로=player.stash_rows / POCKETS 4×1 / 백팩·리그 중첩) 위 배치.
 --   (x,y)=좌상단 칸, footprint는 템플릿의 grid_w×grid_h.
---   스택형은 (player, container, template) 당 한 칸(1×1) + 그 컨테이너에 담긴 quantity,
+--   스택형은 한 칸(1×1) + 그 칸에 담긴 quantity(≤max_stack). 같은 템플릿이 여러 칸에 나뉠 수 있다(다중 스택),
 --   유니크는 인스턴스별로 배치(정확히 한 컨테이너의 한 칸).
 --   컨테이너는 조직화용일 뿐 — 소유 수량의 소스오브트루스는 inventory_stack/item_instance다.
 --   서버 권위 검증: 경계 밖·겹침 금지(애플리케이션 계층에서 판정).
 -- ----------------------------------------------------------------------------
 CREATE TABLE stash_placement (
     player_id   UUID NOT NULL REFERENCES player(id),
-    container   TEXT NOT NULL DEFAULT 'STASH',         -- STASH / LOADOUT / CONTAINER(백팩·리그 내부 그리드)
+    container   TEXT NOT NULL DEFAULT 'STASH',         -- STASH / POCKETS / CONTAINER(백팩·리그 내부 그리드)
     kind        TEXT NOT NULL,                         -- STACK / INSTANCE
     template_id INT  NOT NULL REFERENCES item_template(id),
     instance_id UUID REFERENCES item_instance(id),     -- INSTANCE일 때만
     -- container='CONTAINER'일 때, 이 배치가 놓인 중첩 그리드를 제공하는 컨테이너 인스턴스(장착된 백팩/리그).
-    -- STASH/LOADOUT 배치는 NULL. 같은 스택 템플릿을 여러 물리 컨테이너(STASH/LOADOUT/백팩/리그)에 나눠 담을 수 있다.
+    -- STASH/POCKETS 배치는 NULL. 같은 스택 템플릿을 여러 물리 컨테이너·여러 칸에 나눠 담을 수 있다(다중 스택).
     container_instance_id UUID REFERENCES item_instance(id),
     x           INT  NOT NULL CHECK (x >= 0),
     y           INT  NOT NULL CHECK (y >= 0),
@@ -115,19 +120,19 @@ CREATE TABLE stash_placement (
     -- 인스턴스는 정확히 한 컨테이너+한 칸에만 존재하므로 container를 포함하지 않는 전역 유일.
     CONSTRAINT uq_stash_instance UNIQUE (instance_id),
     CHECK ((kind = 'INSTANCE') = (instance_id IS NOT NULL)),
-    -- 중첩 컨테이너 배치만 container_instance_id를 갖는다(STASH/LOADOUT은 NULL).
+    -- 중첩 컨테이너 배치만 container_instance_id를 갖는다(STASH/POCKETS은 NULL).
     CHECK ((container = 'CONTAINER') = (container_instance_id IS NOT NULL))
 );
 CREATE INDEX idx_stash_player ON stash_placement(player_id);
--- 스택형만 (player, 물리 컨테이너, template) 당 1개. 부분 유니크 인덱스라 INSTANCE 행에는 적용되지 않는다
--- (INSTANCE는 uq_stash_instance로 인스턴스별 유일 → 동일 템플릿 무기 다수 보유 허용).
--- 물리 컨테이너 = (container, container_instance_id). NULL은 센티넬 UUID로 접어 STASH/LOADOUT도 유일해지게 한다
--- → 같은 스택 템플릿을 STASH/LOADOUT/백팩/리그에 각각 한 칸씩 나눠 놓을 수 있다.
-CREATE UNIQUE INDEX uq_stash_stack ON stash_placement(
+-- 셀 유일성: 한 물리 컨테이너의 한 칸(좌상단 (x,y))에는 배치가 최대 1개. 스택·인스턴스 모두 적용.
+-- 물리 컨테이너 = (container, container_instance_id). NULL은 센티넬 UUID로 접어 STASH/POCKETS도 구분되게 한다.
+-- 다중 스택 지원: 같은 스택 템플릿을 여러 칸·여러 컨테이너에 나눠 놓을 수 있다(각 스택은 앱에서 max_stack 상한).
+-- footprint(1×1 초과) 겹침은 그리드 기하 엔진이 앱 레벨에서 강제(DB는 좌상단 칸 충돌만 방지).
+CREATE UNIQUE INDEX uq_stash_cell ON stash_placement(
     player_id, container,
     COALESCE(container_instance_id, '00000000-0000-0000-0000-000000000000'::uuid),
-    template_id
-) WHERE kind = 'STACK';
+    x, y
+);
 
 -- ----------------------------------------------------------------------------
 -- 플레이어 장비(equipment) — 슬롯 → 인스턴스(단일 아이템) 매핑
@@ -221,12 +226,14 @@ CREATE INDEX idx_refresh_token_player ON refresh_token(player_id);
 -- ----------------------------------------------------------------------------
 -- 익스트랙션 레이드 세션 (extraction/raid)
 --   생존형(extraction) 게임의 시그니처 루프를 서비스 계층 상태기계 + 원자적 정산으로 모델링.
---   루프: LOADOUT을 채운다 → StartRaid(로드아웃을 "위험(at-risk)"으로 잠금) →
---         Extract(생존 → 전량 스태시로 회수) | Die(위험 아이템 소실).
+--   반입 대상(at-risk) = 스태시 밖 전부 = 착용 장비(헬멧/방어구/무기/백팩/리그) + 백팩·리그 내용물 + 주머니.
+--     스태시(안전)는 절대 at-risk가 아니다. 착용 장비만 있어도(주머니 비어도) 출격 가능.
+--   루프: 장비를 착용/주머니를 채운다 → StartRaid(스태시 밖 전부를 "위험(at-risk)"으로 잠금) →
+--         Extract(생존 → 출격 시점 배치 그대로 제자리 복원 + 전리품 귀속) | Die(위험 아이템 전량 소실).
 --   설계: 매도 에스크로와 동일한 "자산 잠금" 이동을 재사용한다.
---     - StartRaid: 로드아웃 스택은 inventory_stack에서 차감, 유니크는 owner_player_id=NULL.
+--     - StartRaid: 반입 스택은 inventory_stack에서 차감, 유니크는 owner_player_id=NULL, 장착은 슬롯 해제.
 --       (판매/이동 불가 상태가 되어 레이드 중 이중사용/dupe 원천 차단 — 기존 에스크로 검사가 거부).
---     - 위험 스냅샷은 raid_session_item(레이드 에스크로)에 보관.
+--     - 위험 스냅샷은 raid_session_item(레이드 에스크로)에 원위치와 함께 보관.
 --     - 플레이어당 ACTIVE 세션은 최대 1개(부분 유니크 인덱스로 강제).
 -- ----------------------------------------------------------------------------
 CREATE TABLE raid_session (
@@ -253,10 +260,10 @@ CREATE TABLE raid_session_item (
     source      TEXT NOT NULL,   -- BROUGHT / LOOTED
     -- ---- 원위치 복원 스냅샷(익스트랙션 시맨틱) --------------------------------
     -- StartRaid 시점에 반입(BROUGHT) 아이템이 있던 정확한 위치를 스냅샷한다. Extract(생존) 시
-    -- 이 위치로 그대로 복원한다(스태시 자동 덤프가 아니라 로드아웃 칸/장착 슬롯/백팩·리그 내부로).
+    -- 이 위치로 그대로 복원한다(스태시 자동 덤프가 아니라 장착 슬롯/백팩·리그 내부/주머니 원위치로).
     -- LOOTED(레이드 중 획득) 아이템은 원위치가 없어 전부 NULL이며, Extract 시 반입 공간
-    -- (장착된 백팩·리그 중첩 그리드 → LOADOUT → STASH 오버플로 순)에 first-fit으로 배치된다.
-    origin_container           TEXT,   -- STASH / LOADOUT / CONTAINER / EQUIP (BROUGHT만; LOOTED은 NULL)
+    -- (장착된 백팩·리그 중첩 그리드 → 주머니 → STASH 오버플로 순)에 first-fit으로 배치된다.
+    origin_container           TEXT,   -- POCKETS / CONTAINER / EQUIP (BROUGHT만; LOOTED은 NULL). STASH는 at-risk가 아니라 등장 안 함
     origin_container_instance_id UUID, -- origin_container='CONTAINER'(중첩 백팩·리그 내부)일 때 그 컨테이너 인스턴스
     origin_slot                TEXT,   -- origin_container='EQUIP'일 때 장착 슬롯(HELMET/ARMOR/WEAPON/BACKPACK/RIG)
     origin_x                   INT,    -- 그리드 원위치(EQUIP은 NULL)
@@ -426,6 +433,12 @@ UPDATE item_template SET grid_w = 2, grid_h = 2
 UPDATE item_template SET grid_w = 4, grid_h = 2
   WHERE code IN ('sawed_shotgun','pump_shotgun','double_shotgun','uzi_smg','mp5_smg','ak47_rifle',
                  'm4_rifle','hunting_rifle','sniper_rifle','lever_rifle','crossbow','compound_bow','grenade_launcher');
+
+-- ---- max_stack (한 칸에 쌓을 수 있는 최대 수량) : 카테고리 기본값 -----------------
+-- 유니크(MELEE/GUN/GEAR)는 기본 1. 스택형만 카테고리별 상한을 준다. 초과분은 새 스택으로 분리.
+UPDATE item_template SET max_stack = 60 WHERE category = 'AMMO';
+UPDATE item_template SET max_stack = 10 WHERE category = 'FOOD';
+UPDATE item_template SET max_stack = 5  WHERE category = 'MEDICAL';
 
 -- ============================================================================
 --  시드: 개발용 플레이어 3명 + 지갑 + 초기 인벤토리
