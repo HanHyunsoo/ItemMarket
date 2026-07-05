@@ -228,3 +228,48 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
   이론/의도됨) 표기. 정합성 불변식(fee 보존·이중판매·데드락 순서)은 코드 증명으로 소거.
 - **fun QA:** 라이브 앱 직접 플레이(무료 loot로 경제 취약점 실증) + 화면 코드 확인. 주관적 설계·UX 신호.
 - 이 문서의 findings는 **미수정 상태**로, 후속 작업에서 우선순위에 따라 처리한다.
+
+---
+
+## 수정 백로그 (체크리스트)
+
+> 발견 항목을 실제 작업 단위로 정리. 위에서부터 대략 우선순위순. 고치면 `[x]`로 체크.
+> (레이블은 A/B 섹션의 finding id와 대응.)
+
+### 기능 — 정합성·계약·견고성
+- [ ] **M4** 사망 시 `item_ledger` 대칭화 — 반입분은 사망 때 재차감(`RaidLoss`) 하지 말 것(이미 출격
+      `RaidBrought`에서 debit). 전리품-사망은 사전 크레딧 없이 `RaidLoss`만 남는 유령 음수 처리.
+      (`MarketRepository.cs:1307,1315`)
+- [ ] **M2** 멱등성 — 프로덕션에서 Redis 필수화. 무저장 폴백(`NullIdempotencyStore`)일 땐 `Idempotency-Key`를
+      거부하거나 경고 로그. (`Program.cs:76-79`, `IdempotencyStore.cs:84-92`)
+- [ ] **M3** OpenAPI enum — Swashbuckle 스키마 필터로 enum을 `type:string` + 값 목록으로 노출
+      (`JsonStringEnumConverter` 반영). (`SwaggerSetup`)
+- [ ] **M1/BUG2** `GET /api/stash/container` → 400 — `ParseContainer`가 `Container`를 거절하거나 `GetStash`가
+      InstanceId 없는 `Container`를 검증. (`StashEndpoints.cs:35`, `StashGrain.cs:171-174`)
+- [ ] **B(raid) StartedAt/ResolvedAt** — `LoadRaidDtoAsync`가 `started_at`/`resolved_at`을 DB에서 읽도록.
+      (`MarketRepository.cs:1230,1331,1540-1550`)
+- [ ] **BUG D** loot 수량 상한 — `AddLootAsync`에서 `max_stack` 기준 검증/분할(현재 `1..1_000_000`만).
+      (`MarketRepository.cs:1205`)
+- [ ] **L2/BUG4** 음수·0·null Quantity 검증 — 빈 풀 분기에도 하한 검증 추가(`ValidationError`).
+      (`MarketRepository.cs:459-468`)
+- [ ] **L7** `fee_bps` `[0,10000]` 클램프. (`MarketRepository.cs:37-43`)
+- [ ] **L8** 레이트리밋 임계 재설정(현재 1000/10s). (`RateLimiting.cs:23-24`, `appsettings.json:27`)
+- [ ] **L9(a)** 에스크로+주문 INSERT 동일 트랜잭션 or 멱등 재조정(커밋-후-예외 이중환불 창).
+      (`OrderBookEngine.cs:150-177`)
+- [ ] **BUG3**(선택) 중첩 컨테이너 그리드 직접 읽기 HTTP 라우트 노출. (`IStashGrain.GetContainer`)
+- [ ] **L1**(향후) 다중셀 스택 footprint — grid>1×1 스택형을 추가할 때 `Ctx.Footprints` 참조로 전환.
+- [ ] **문서 정렬** — `MoveStashItemRequest.Quantity`(풀 의미), `AddLootRequest.Kind`(무시됨),
+      `GET /api/raid`(ACTIVE-only, 코드 유지·주석 수정) 계약 텍스트를 구현에 맞춤.
+- [ ] **L9(b)/FINDING A**(선택) 가격밴드 ON 교차-밴드 매칭 — 문서화된 트레이드오프. 필요 시 크로스밴드
+      코디네이션 도입.
+
+### fun — 설계·UX (재미 임팩트순)
+- [ ] **#1** 레이드 타이머(시간 내 미탈출 시 소실) — 탈출-vs-푸시 긴장. `[하~중]`
+- [ ] **#2** 마켓 카드 실시간 시세(최근체결/최우선호가+유동성 점, 활동순 정렬). `[하~중]`
+- [ ] **#3** 서버 드롭테이블(존/난이도별) — 무료 loot 폼 대체, 무한생성 차단. `[중~상]`
+- [ ] **#4** loot마다 사망 확률 상승(그리드 미터). `[중]`
+- [ ] **#5** 목적 있는 캡 싱크(스태시 행 업그레이드·내구도/수리·보험·출격 수수료). `[중]`
+- [ ] **#6** 첫 방문 온보딩(루프 설명 스트립/오버레이). `[하]`
+- [ ] **#7** 이중어 네비 통일 + Stash/Gear 명칭 충돌 해소. `[하]`
+- [ ] **#9** 출격 매니페스트에 총 at-risk 가치(캡) 표시. `[하]`
+- [ ] **#8** 희귀 전리품 추격 + 리더보드(경제에 판돈 생긴 뒤). `[중]`
