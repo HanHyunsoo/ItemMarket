@@ -54,7 +54,17 @@ CREATE TABLE item_template (
     base_value     BIGINT  NOT NULL,   -- 참고 시세(병뚜껑). 시드/어드민 가이드용
     grid_w         INT     NOT NULL DEFAULT 1 CHECK (grid_w BETWEEN 1 AND 6),  -- 스태시 footprint 폭(칸)
     grid_h         INT     NOT NULL DEFAULT 1 CHECK (grid_h BETWEEN 1 AND 6),  -- 스태시 footprint 높이(칸)
-    CHECK (stackable = (max_durability IS NULL))
+    -- ---- 장비(equipment) / 중첩 컨테이너(nested-grid) 확장 ----------------------
+    -- equip_slot: 장착 슬롯(HELMET/ARMOR/WEAPON/BACKPACK/RIG). NULL이면 장착 불가.
+    --   슬롯별로 정확히 한 인스턴스만 장착(player_equipment). GUN 카테고리는 WEAPON 슬롯.
+    equip_slot     TEXT,
+    -- is_container: 내부 그리드를 제공하는 아이템(백팩/리그). true면 container_w×container_h가
+    --   그 인스턴스의 중첩 그리드 크기. 스택/유니크를 그 안에 배치할 수 있다(stash_placement.container_instance_id).
+    is_container   BOOLEAN NOT NULL DEFAULT false,
+    container_w    INT,
+    container_h    INT,
+    CHECK (stackable = (max_durability IS NULL)),
+    CHECK (is_container = (container_w IS NOT NULL AND container_h IS NOT NULL))
 );
 
 -- ----------------------------------------------------------------------------
@@ -91,23 +101,50 @@ CREATE INDEX idx_item_instance_owner ON item_instance(owner_player_id);
 -- ----------------------------------------------------------------------------
 CREATE TABLE stash_placement (
     player_id   UUID NOT NULL REFERENCES player(id),
-    container   TEXT NOT NULL DEFAULT 'STASH',         -- STASH / LOADOUT
+    container   TEXT NOT NULL DEFAULT 'STASH',         -- STASH / LOADOUT / CONTAINER(백팩·리그 내부 그리드)
     kind        TEXT NOT NULL,                         -- STACK / INSTANCE
     template_id INT  NOT NULL REFERENCES item_template(id),
     instance_id UUID REFERENCES item_instance(id),     -- INSTANCE일 때만
+    -- container='CONTAINER'일 때, 이 배치가 놓인 중첩 그리드를 제공하는 컨테이너 인스턴스(장착된 백팩/리그).
+    -- STASH/LOADOUT 배치는 NULL. 같은 스택 템플릿을 여러 물리 컨테이너(STASH/LOADOUT/백팩/리그)에 나눠 담을 수 있다.
+    container_instance_id UUID REFERENCES item_instance(id),
     x           INT  NOT NULL CHECK (x >= 0),
     y           INT  NOT NULL CHECK (y >= 0),
     quantity    INT  NOT NULL DEFAULT 1 CHECK (quantity >= 1),  -- 이 컨테이너에 담긴 스택 수량(유니크는 1)
     -- 유니크 아이템은 인스턴스 단위로 유일(같은 템플릿 무기를 여러 자루 소유 가능).
     -- 인스턴스는 정확히 한 컨테이너+한 칸에만 존재하므로 container를 포함하지 않는 전역 유일.
     CONSTRAINT uq_stash_instance UNIQUE (instance_id),
-    CHECK ((kind = 'INSTANCE') = (instance_id IS NOT NULL))
+    CHECK ((kind = 'INSTANCE') = (instance_id IS NOT NULL)),
+    -- 중첩 컨테이너 배치만 container_instance_id를 갖는다(STASH/LOADOUT은 NULL).
+    CHECK ((container = 'CONTAINER') = (container_instance_id IS NOT NULL))
 );
 CREATE INDEX idx_stash_player ON stash_placement(player_id);
--- 스택형만 (player, container, template) 당 1개. 부분 유니크 인덱스라 INSTANCE 행에는 적용되지 않는다
+-- 스택형만 (player, 물리 컨테이너, template) 당 1개. 부분 유니크 인덱스라 INSTANCE 행에는 적용되지 않는다
 -- (INSTANCE는 uq_stash_instance로 인스턴스별 유일 → 동일 템플릿 무기 다수 보유 허용).
--- container를 키에 포함 → 같은 스택 템플릿을 컨테이너마다 한 칸씩(예: STASH+LOADOUT) 나눠 놓을 수 있다.
-CREATE UNIQUE INDEX uq_stash_stack ON stash_placement(player_id, container, template_id) WHERE kind = 'STACK';
+-- 물리 컨테이너 = (container, container_instance_id). NULL은 센티넬 UUID로 접어 STASH/LOADOUT도 유일해지게 한다
+-- → 같은 스택 템플릿을 STASH/LOADOUT/백팩/리그에 각각 한 칸씩 나눠 놓을 수 있다.
+CREATE UNIQUE INDEX uq_stash_stack ON stash_placement(
+    player_id, container,
+    COALESCE(container_instance_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    template_id
+) WHERE kind = 'STACK';
+
+-- ----------------------------------------------------------------------------
+-- 플레이어 장비(equipment) — 슬롯 → 인스턴스(단일 아이템) 매핑
+--   슬롯(HELMET/ARMOR/WEAPON/BACKPACK/RIG)마다 정확히 한 인스턴스만 장착.
+--   인스턴스는 template.equip_slot과 일치하는 슬롯에만 장착 가능(서버 권위 검증).
+--   장착된 인스턴스는 소유(owner_player_id=player) 상태이나 스태시 그리드에는 배치되지 않는다
+--   (인형(doll) 위에 있음). 장착된 백팩/리그는 내부 그리드(중첩 컨테이너)를 제공한다.
+-- ----------------------------------------------------------------------------
+CREATE TABLE player_equipment (
+    player_id   UUID NOT NULL REFERENCES player(id),
+    slot        TEXT NOT NULL,   -- HELMET / ARMOR / WEAPON / BACKPACK / RIG
+    instance_id UUID NOT NULL REFERENCES item_instance(id),
+    PRIMARY KEY (player_id, slot),
+    -- 한 인스턴스는 최대 한 슬롯에만 장착.
+    CONSTRAINT uq_player_equipment_instance UNIQUE (instance_id)
+);
+CREATE INDEX idx_player_equipment_player ON player_equipment(player_id);
 
 -- ----------------------------------------------------------------------------
 -- 주문서(order book) & 체결(trade)
@@ -351,6 +388,18 @@ INSERT INTO item_template
 (100,'ammo_bolt',     '석궁 볼트',        'AMMO','COMMON',  true, NULL,'ammo_shell',   5),
 (101,'ammo_arrow',    '화살',             'AMMO','COMMON',  true, NULL,'ammo_shell',   4),
 (102,'ammo_flare',    '조명탄',           'AMMO','UNCOMMON',true, NULL,'ammo_shell',  10);
+
+-- 장비/컨테이너 (GEAR) - 유니크 인스턴스. 백팩/리그는 내부 그리드(중첩 컨테이너) 보유 ---------
+INSERT INTO item_template
+    (id, code, name, category, rarity, stackable, max_durability, icon, base_value,
+     grid_w, grid_h, equip_slot, is_container, container_w, container_h) VALUES
+(103,'combat_helmet','전투 헬멧',   'GEAR','RARE',    false,120,'equip_helmet',   300, 2, 2,'HELMET',   false, NULL, NULL),
+(104,'body_armor',   '방탄 조끼',   'GEAR','EPIC',    false,240,'equip_armor',    900, 2, 3,'ARMOR',    false, NULL, NULL),
+(105,'tactical_rig', '전술 리그',   'GEAR','RARE',    false,100,'equip_rig',      450, 2, 2,'RIG',      true,     4,    3),
+(106,'backpack',     '배낭',        'GEAR','UNCOMMON',false,100,'equip_backpack', 350, 3, 3,'BACKPACK', true,     5,    5);
+
+-- 기존 총(GUN) 카탈로그를 WEAPON 슬롯 장착 가능으로 매핑.
+UPDATE item_template SET equip_slot = 'WEAPON' WHERE category = 'GUN';
 
 -- ---- 스태시 footprint(grid_w×grid_h) --------------------------------------
 -- 스택형(FOOD/MEDICAL/AMMO)은 기본 1×1. 유니크 무기만 크기를 준다.

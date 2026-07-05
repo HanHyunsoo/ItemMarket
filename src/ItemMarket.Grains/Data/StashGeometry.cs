@@ -30,9 +30,13 @@ public static class StashGeometry
     public static bool InBounds(GridContainer container, Rect r)
     {
         var (gw, gh) = Dims(container);
-        return r.X >= 0 && r.Y >= 0 && r.W >= 1 && r.H >= 1
-               && r.X + r.W <= gw && r.Y + r.H <= gh;
+        return InBounds(gw, gh, r);
     }
+
+    /// <summary>footprint가 gw×gh 그리드 경계 안에 완전히 들어오는가(중첩 컨테이너 등 동적 크기용).</summary>
+    public static bool InBounds(int gw, int gh, Rect r)
+        => r.X >= 0 && r.Y >= 0 && r.W >= 1 && r.H >= 1
+           && r.X + r.W <= gw && r.Y + r.H <= gh;
 
     /// <summary>두 사각형이 한 칸이라도 겹치는가(경계 맞닿음은 겹침 아님).</summary>
     public static bool Overlaps(Rect a, Rect b)
@@ -44,8 +48,11 @@ public static class StashGeometry
     /// occupied와 겹치지 않고 컨테이너 경계 안이면 그 (x,y)를 반환. 없으면 null.
     /// </summary>
     public static (int X, int Y)? FirstFit(GridContainer container, IReadOnlyCollection<Rect> occupied, int w, int h)
+        => FirstFit(Dims(container).W, Dims(container).H, occupied, w, h);
+
+    /// <summary>w×h footprint를 gw×gh 그리드에서 first-fit으로 찾는다(동적 크기용). 없으면 null.</summary>
+    public static (int X, int Y)? FirstFit(int gw, int gh, IReadOnlyCollection<Rect> occupied, int w, int h)
     {
-        var (gw, gh) = Dims(container);
         for (var y = 0; y + h <= gh; y++)
         {
             for (var x = 0; x + w <= gw; x++)

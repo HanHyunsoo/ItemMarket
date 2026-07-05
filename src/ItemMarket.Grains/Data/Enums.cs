@@ -1,3 +1,4 @@
+using ItemMarket.Contracts.Equipment;
 using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Orders;
 using ItemMarket.Contracts.Raid;
@@ -63,8 +64,42 @@ public static class Enums
     public static StashEntryKind ToStashKind(string k) => k == "INSTANCE" ? StashEntryKind.Instance : StashEntryKind.Stack;
 
     // --- GridContainer -----------------------------------------------------
-    public static string ToDb(this GridContainer c) => c == GridContainer.Loadout ? "LOADOUT" : "STASH";
-    public static GridContainer ToContainer(string c) => c == "LOADOUT" ? GridContainer.Loadout : GridContainer.Stash;
+    public static string ToDb(this GridContainer c) => c switch
+    {
+        GridContainer.Loadout => "LOADOUT",
+        GridContainer.Container => "CONTAINER",
+        _ => "STASH"
+    };
+
+    public static GridContainer ToContainer(string c) => c switch
+    {
+        "LOADOUT" => GridContainer.Loadout,
+        "CONTAINER" => GridContainer.Container,
+        _ => GridContainer.Stash
+    };
+
+    // --- EquipSlot ---------------------------------------------------------
+    public static string ToDb(this EquipSlot s) => s switch
+    {
+        EquipSlot.Helmet => "HELMET",
+        EquipSlot.Armor => "ARMOR",
+        EquipSlot.Weapon => "WEAPON",
+        EquipSlot.Backpack => "BACKPACK",
+        EquipSlot.Rig => "RIG",
+        _ => "WEAPON"
+    };
+
+    public static EquipSlot ToEquipSlot(string s) => s switch
+    {
+        "HELMET" => EquipSlot.Helmet,
+        "ARMOR" => EquipSlot.Armor,
+        "WEAPON" => EquipSlot.Weapon,
+        "BACKPACK" => EquipSlot.Backpack,
+        "RIG" => EquipSlot.Rig,
+        _ => throw new ArgumentOutOfRangeException(nameof(s), s, "알 수 없는 장착 슬롯")
+    };
+
+    public static EquipSlot? ToEquipSlotOrNull(string? s) => s is null ? null : ToEquipSlot(s);
 
     // --- ItemCategory ------------------------------------------------------
     public static ItemCategory ToCategory(string c) => c switch
@@ -74,6 +109,7 @@ public static class Enums
         "MELEE" => ItemCategory.Melee,
         "GUN" => ItemCategory.Gun,
         "AMMO" => ItemCategory.Ammo,
+        "GEAR" => ItemCategory.Gear,
         _ => ItemCategory.Food
     };
 
