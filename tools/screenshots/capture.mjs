@@ -71,14 +71,26 @@ const run = async () => {
   await page.locator('.balance-val').first().waitFor({ state: 'visible', timeout: 15000 })
   await shot(page, 'wallet.png')
 
-  // ---- Switch to Survivor_Bravo (holds weapons: AK-47 4x2 in the grid) ----
-  await selectPlayer(page, 'Survivor_Bravo')
+  // ---- Switch to Gearhead_Golf (full equipment doll: helmet/armor/weapon +
+  //      nested rig/backpack grids) for the unified Gear screen ----
+  await selectPlayer(page, 'Gearhead_Golf')
 
-  // 4) Grid stash
-  await goto(page, '/stash')
-  await page.locator('.stash-grid').first().waitFor({ state: 'visible', timeout: 15000 })
-  await page.locator('.tile-sprite').first().waitFor({ state: 'visible', timeout: 15000 })
-  await shot(page, 'grid-stash.png')
+  // 4) Unified Gear screen — stash grid + character doll + nested grids.
+  //    Taller viewport so stash and the equipment doll sit side by side.
+  await goto(page, '/gear')
+  await page.locator('.layout').first().waitFor({ state: 'visible', timeout: 15000 })
+  await page.locator('.doll .slots .slot.filled').first().waitFor({ state: 'visible', timeout: 15000 })
+  await page.setViewportSize({ width: 1440, height: 1180 })
+  await shot(page, 'gear.png')
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // ---- Switch to Raider_Delta (has resolved raid history) ----
+  await selectPlayer(page, 'Raider_Delta')
+
+  // 5) Raid records — extract/die outcomes + brought vs looted item lists.
+  await goto(page, '/records')
+  await page.locator('.wx-panel.raid-card').first().waitFor({ state: 'visible', timeout: 15000 })
+  await shot(page, 'records.png')
 
   // ---- Switch to Trader_Charlie (admin) ----
   await selectPlayer(page, 'Trader_Charlie')
