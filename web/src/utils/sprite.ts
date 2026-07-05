@@ -4,6 +4,10 @@ import type { ItemCategory } from '@/api/types'
 const AVAILABLE = new Set([
   'ammo_box',
   'ammo_shell',
+  'equip_armor',
+  'equip_backpack',
+  'equip_helmet',
+  'equip_rig',
   'food_can',
   'food_snack',
   'food_water',
@@ -26,6 +30,7 @@ const CATEGORY_FALLBACK: Record<ItemCategory, string> = {
   Melee: 'melee_knife',
   Gun: 'gun_pistol',
   Ammo: 'ammo_box',
+  Gear: 'equip_backpack',
 }
 
 export function spriteUrl(icon: string | undefined, category?: ItemCategory): string {

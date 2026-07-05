@@ -1,4 +1,10 @@
-import type { ItemRarity, OrderStatus, WalletLedgerReason } from '@/api/types'
+import type {
+  ItemLedgerReason,
+  ItemRarity,
+  OrderStatus,
+  RaidStatus,
+  WalletLedgerReason,
+} from '@/api/types'
 
 const capFmt = new Intl.NumberFormat('en-US')
 
@@ -78,4 +84,41 @@ const LEDGER_REASON_LABEL: Record<WalletLedgerReason, string> = {
 
 export function ledgerReasonLabel(reason: WalletLedgerReason | string): string {
   return LEDGER_REASON_LABEL[reason as WalletLedgerReason] ?? reason
+}
+
+// ---- Item ledger (movement log) reason labels ----
+const ITEM_LEDGER_REASON_LABEL: Record<ItemLedgerReason, string> = {
+  RaidBrought: 'Taken on raid',
+  RaidExtract: 'Extracted (recovered)',
+  RaidLoot: 'Looted',
+  RaidLoss: 'Lost in action',
+  AdminGrant: 'Admin grant',
+}
+
+export function itemLedgerReasonLabel(reason: ItemLedgerReason | string): string {
+  return ITEM_LEDGER_REASON_LABEL[reason as ItemLedgerReason] ?? reason
+}
+
+// ---- Raid outcome presentation ----
+export function raidStatusLabel(status: RaidStatus): string {
+  switch (status) {
+    case 'Extracted':
+      return 'Extracted'
+    case 'Died':
+      return 'Killed in action'
+    default:
+      return 'In progress'
+  }
+}
+
+// Themed color for a raid outcome: survived = green, died = red.
+export function raidStatusColor(status: RaidStatus): string {
+  switch (status) {
+    case 'Extracted':
+      return 'var(--wx-buy)'
+    case 'Died':
+      return 'var(--wx-sell)'
+    default:
+      return 'var(--wx-amber)'
+  }
 }

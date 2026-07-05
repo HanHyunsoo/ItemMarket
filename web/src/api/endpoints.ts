@@ -5,8 +5,11 @@ import type {
   AdminForceCancelOrderRequest,
   AdminGrantInstanceRequest,
   AdminGrantStackRequest,
+  EquipmentDto,
+  EquipRequest,
   InventoryDto,
   ItemInstanceDto,
+  ItemLedgerEntryDto,
   ItemTemplateDto,
   LoginRequest,
   GridContainer,
@@ -17,11 +20,13 @@ import type {
   PagedResult,
   PlaceOrderRequest,
   PlaceOrderResult,
+  RaidHistoryEntryDto,
   RaidSessionDto,
   RefreshRequest,
   StashDto,
   TokenResponse,
   TradeDto,
+  UnequipRequest,
   WalletDto,
   WalletLedgerEntryDto,
 } from './types'
@@ -46,6 +51,17 @@ export const walletApi = {
 
 export const inventoryApi = {
   get: () => api.get<InventoryDto>('/api/inventory'),
+  // Append-only item movement log (raid brought/extract/loot/loss + admin grants).
+  ledger: (page: number, size: number) =>
+    api.get<PagedResult<ItemLedgerEntryDto>>('/api/inventory/ledger', { page, size }),
+}
+
+// ---- Equipment (character doll slots + nested backpack/rig grids) ----
+export const equipmentApi = {
+  get: () => api.get<EquipmentDto>('/api/equipment'),
+  // Both return the full updated EquipmentDto. A slot mismatch → SlotMismatch (400).
+  equip: (body: EquipRequest) => api.post<EquipmentDto>('/api/equipment/equip', body),
+  unequip: (body: UnequipRequest) => api.post<EquipmentDto>('/api/equipment/unequip', body),
 }
 
 export const stashApi = {
@@ -65,6 +81,9 @@ export const raidApi = {
   loot: (body: AddLootRequest) => api.post<RaidSessionDto>('/api/raid/loot', body),
   extract: () => api.post<RaidSessionDto>('/api/raid/extract'),
   die: () => api.post<RaidSessionDto>('/api/raid/die'),
+  // Resolved raids (Extracted/Died), newest first, paged.
+  history: (page: number, size: number) =>
+    api.get<PagedResult<RaidHistoryEntryDto>>('/api/raid/history', { page, size }),
 }
 
 export const marketApi = {
