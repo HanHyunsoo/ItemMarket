@@ -1,0 +1,590 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessageBox } from 'element-plus'
+import { useCatalogStore } from '@/stores/catalog'
+import { raidApi, stashApi } from '@/api/endpoints'
+import { notifyWalletChanged } from '@/realtime/marketHub'
+import ItemGrid from '@/components/ItemGrid.vue'
+import RaidItemRow from '@/components/RaidItemRow.vue'
+import { dateTime, shortId } from '@/utils/format'
+import { toastError, toastSuccess } from '@/utils/toast'
+import { ApiClientError } from '@/api/client'
+import type { RaidSessionDto, StashDto } from '@/api/types'
+
+const catalog = useCatalogStore()
+const router = useRouter()
+
+// The live active raid (from GET /api/raid or start/loot). `outcome` holds a
+// just-resolved session (extract/die) to render the result screen — the server no
+// longer returns it via GET, so we keep it locally until the user returns.
+const raid = ref<RaidSessionDto | null>(null)
+const outcome = ref<RaidSessionDto | null>(null)
+const loadout = ref<StashDto | null>(null)
+
+const loading = ref(false)
+const deploying = ref(false)
+const looting = ref(false)
+const resolving = ref(false)
+
+// loot form
+const lootTemplateId = ref<number | null>(null)
+const lootQty = ref(1)
+
+// prep | active | outcome — drives which panel shows.
+const mode = computed<'prep' | 'active' | 'outcome'>(() => {
+  if (outcome.value) return 'outcome'
+  if (raid.value && raid.value.status === 'Active') return 'active'
+  return 'prep'
+})
+
+const loadoutEmpty = computed(
+  () =>
+    !!loadout.value &&
+    loadout.value.placements.length === 0 &&
+    loadout.value.unplaced.length === 0,
+)
+
+const broughtItems = computed(() => raid.value?.items.filter((i) => i.source === 'Brought') ?? [])
+const lootedItems = computed(() => raid.value?.items.filter((i) => i.source === 'Looted') ?? [])
+const atRiskCount = computed(() => raid.value?.items.reduce((n, i) => n + i.quantity, 0) ?? 0)
+
+const lootOptions = computed(() => [...catalog.items].sort((a, b) => a.name.localeCompare(b.name)))
+
+function tplName(id: number): string {
+  return catalog.get(id)?.name ?? `#${id}`
+}
+
+async function loadLoadout(): Promise<void> {
+  loadout.value = await stashApi.get('Loadout')
+}
+
+onMounted(async () => {
+  loading.value = true
+  try {
+    await catalog.ensureLoaded()
+    const [r] = await Promise.all([raidApi.get(), loadLoadout()])
+    raid.value = r
+  } catch (err) {
+    toastError(err, 'Could not reach the raid controller.')
+  } finally {
+    loading.value = false
+  }
+})
+
+async function onDeploy(): Promise<void> {
+  deploying.value = true
+  try {
+    raid.value = await raidApi.start()
+    toastSuccess('출격 — 레이드에 진입했습니다.')
+  } catch (err) {
+    // Already deployed elsewhere: sync to the live raid instead of erroring out.
+    if (err instanceof ApiClientError && err.apiError.code === 'RaidActive') {
+      raid.value = await raidApi.get()
+    }
+    toastError(err, 'Deploy failed.')
+  } finally {
+    deploying.value = false
+  }
+}
+
+async function onLoot(): Promise<void> {
+  if (lootTemplateId.value === null) return
+  looting.value = true
+  try {
+    raid.value = await raidApi.loot({ templateId: lootTemplateId.value, quantity: lootQty.value })
+    toastSuccess(`획득 — ${tplName(lootTemplateId.value)} ×${lootQty.value}`)
+    lootQty.value = 1
+  } catch (err) {
+    toastError(err, 'Loot failed.')
+  } finally {
+    looting.value = false
+  }
+}
+
+// Shared post-resolve refresh: header caps chip (via wallet fan-out) plus the
+// prep-screen loadout, which the server has now emptied. Inventory/Stash views
+// re-fetch on their own navigation.
+async function afterResolve(): Promise<void> {
+  notifyWalletChanged()
+  try {
+    await loadLoadout()
+  } catch {
+    /* non-fatal — prep screen will retry on return */
+  }
+}
+
+async function onExtract(): Promise<void> {
+  resolving.value = true
+  try {
+    outcome.value = await raidApi.extract()
+    raid.value = null
+    toastSuccess('탈출 성공 — 아이템이 창고로 귀속되었습니다.')
+    await afterResolve()
+  } catch (err) {
+    if (err instanceof ApiClientError && err.apiError.code === 'RaidNotFound') {
+      raid.value = await raidApi.get()
+    }
+    toastError(err, 'Extraction failed.')
+  } finally {
+    resolving.value = false
+  }
+}
+
+async function onDie(): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      '사망 처리하면 반입·획득한 모든 아이템이 소실됩니다. 계속할까요?',
+      '사망 확정',
+      { confirmButtonText: '사망 확정', cancelButtonText: '취소', type: 'error' },
+    )
+  } catch {
+    return
+  }
+  resolving.value = true
+  try {
+    outcome.value = await raidApi.die()
+    raid.value = null
+    toastSuccess('사망 처리됨 — 아이템이 소실되었습니다.')
+    await afterResolve()
+  } catch (err) {
+    if (err instanceof ApiClientError && err.apiError.code === 'RaidNotFound') {
+      raid.value = await raidApi.get()
+    }
+    toastError(err, 'Resolve failed.')
+  } finally {
+    resolving.value = false
+  }
+}
+
+async function onReturn(): Promise<void> {
+  outcome.value = null
+  raid.value = null
+  loading.value = true
+  try {
+    const [r] = await Promise.all([raidApi.get(), loadLoadout()])
+    raid.value = r
+  } catch (err) {
+    toastError(err, 'Could not reload the staging area.')
+  } finally {
+    loading.value = false
+  }
+}
+
+function goLoadout(): void {
+  router.push({ name: 'loadout' })
+}
+</script>
+
+<template>
+  <div v-loading="loading">
+    <h1 class="wx-page-title">출격 · Extraction Raid</h1>
+    <p class="wx-page-sub">
+      장비(Loadout)를 챙겨 출격 — 획득하고, 탈출하면 귀속, 사망하면 소실. High risk, high reward.
+    </p>
+
+    <!-- ============ PREP: no active raid ============ -->
+    <div v-if="mode === 'prep' && loadout" class="stage">
+      <section class="wx-panel prep-loadout">
+        <div class="panel-head">
+          <span class="wx-section-title">반입 장비 · Loadout</span>
+          <span class="grid-cap mono">{{ loadout.gridW }}×{{ loadout.gridH }}</span>
+        </div>
+
+        <template v-if="loadoutEmpty">
+          <div class="wx-empty">
+            <img class="pixel" src="/sprites/ammo_box.svg" alt="" />
+            장비가 비어 있습니다. 출격하려면 먼저 장비를 채우세요.
+          </div>
+          <el-button class="w-full" @click="goLoadout">장비 꾸리기 →</el-button>
+        </template>
+
+        <template v-else>
+          <p class="hint mono">
+            이 장비가 그대로 반입됩니다. 배치를 바꾸려면
+            <a class="link" @click="goLoadout">장비 화면</a>에서 조정하세요.
+          </p>
+          <div class="grid-scroll">
+            <ItemGrid :stash="loadout" :busy="true" :show-tray="true" />
+          </div>
+        </template>
+      </section>
+
+      <aside class="wx-panel deploy-panel">
+        <div class="deploy-brief">
+          <span class="wx-section-title">출격 브리핑</span>
+          <ul class="brief-list">
+            <li><span class="wx-buy">탈출(Extract)</span> — 반입 + 획득 아이템이 창고로 귀속</li>
+            <li><span class="wx-sell">사망(Die)</span> — 반입 + 획득 아이템 전부 소실 (창고는 안전)</li>
+          </ul>
+        </div>
+        <el-button
+          type="primary"
+          size="large"
+          class="deploy-btn"
+          :loading="deploying"
+          :disabled="loadoutEmpty"
+          @click="onDeploy"
+        >
+          출격 · DEPLOY
+        </el-button>
+        <p v-if="loadoutEmpty" class="deploy-note mono wx-muted">
+          장비를 채워야 출격할 수 있습니다.
+        </p>
+      </aside>
+    </div>
+
+    <!-- ============ ACTIVE: in-raid ============ -->
+    <div v-else-if="mode === 'active' && raid" class="stage">
+      <section class="wx-panel manifest-panel">
+        <div class="panel-head">
+          <span class="wx-section-title">위험 노출 매니페스트 · At Risk</span>
+          <span class="risk-badge mono">{{ atRiskCount }} 점 노출</span>
+        </div>
+        <p class="atrisk-warn mono">
+          ⚠ 아래 아이템은 전투 지역에 노출되어 있습니다 — 사망 시 전부 소실됩니다.
+        </p>
+
+        <div class="manifest-group">
+          <div class="group-label brought">반입 · Brought ({{ broughtItems.length }})</div>
+          <div v-if="broughtItems.length" class="rows">
+            <RaidItemRow v-for="(it, i) in broughtItems" :key="`b${i}`" :item="it" />
+          </div>
+          <p v-else class="empty-line mono">맨몸 출격 — 반입 장비 없음.</p>
+        </div>
+
+        <div class="manifest-group">
+          <div class="group-label looted">획득 · Looted ({{ lootedItems.length }})</div>
+          <div v-if="lootedItems.length" class="rows">
+            <RaidItemRow v-for="(it, i) in lootedItems" :key="`l${i}`" :item="it" />
+          </div>
+          <p v-else class="empty-line mono">아직 획득한 아이템이 없습니다.</p>
+        </div>
+      </section>
+
+      <aside class="side-col">
+        <section class="wx-panel loot-panel">
+          <span class="wx-section-title">획득 시뮬 · Loot</span>
+          <div class="loot-form">
+            <el-select
+              v-model="lootTemplateId"
+              filterable
+              placeholder="아이템 선택"
+              class="loot-select"
+            >
+              <el-option v-for="t in lootOptions" :key="t.id" :label="t.name" :value="t.id" />
+            </el-select>
+            <el-input-number v-model="lootQty" :min="1" :max="999" class="loot-qty" />
+            <el-button
+              class="loot-btn"
+              :loading="looting"
+              :disabled="lootTemplateId === null"
+              @click="onLoot"
+            >
+              획득
+            </el-button>
+          </div>
+        </section>
+
+        <section class="wx-panel resolve-panel">
+          <span class="wx-section-title">레이드 종료 · Resolve</span>
+          <el-button
+            type="success"
+            size="large"
+            class="resolve-btn extract"
+            :loading="resolving"
+            @click="onExtract"
+          >
+            탈출 · EXTRACT
+          </el-button>
+          <el-button
+            type="danger"
+            size="large"
+            class="resolve-btn die"
+            :loading="resolving"
+            @click="onDie"
+          >
+            사망 · DIE
+          </el-button>
+          <p class="resolve-note mono wx-muted">탈출 = 아이템 귀속 · 사망 = 아이템 소실</p>
+        </section>
+      </aside>
+    </div>
+
+    <!-- ============ OUTCOME: extracted / died ============ -->
+    <div v-else-if="mode === 'outcome' && outcome" class="stage single">
+      <section
+        class="wx-panel outcome-panel"
+        :class="outcome.status === 'Extracted' ? 'survived' : 'killed'"
+      >
+        <div class="outcome-head">
+          <div class="outcome-title">
+            {{ outcome.status === 'Extracted' ? '탈출 성공' : '사망' }}
+          </div>
+          <div class="outcome-sub mono">
+            {{
+              outcome.status === 'Extracted'
+                ? 'EXTRACTED · 아이템 귀속됨'
+                : 'KILLED IN ACTION · 아이템 소실됨'
+            }}
+          </div>
+          <div class="outcome-meta mono">
+            #{{ shortId(outcome.id) }} · {{ dateTime(outcome.resolvedAt ?? outcome.startedAt) }}
+          </div>
+        </div>
+
+        <div class="outcome-list">
+          <div class="group-label" :class="outcome.status === 'Extracted' ? 'brought' : 'looted'">
+            {{ outcome.status === 'Extracted' ? '귀속된 아이템 · Recovered' : '소실된 아이템 · Lost' }}
+            ({{ outcome.items.length }})
+          </div>
+          <div v-if="outcome.items.length" class="rows">
+            <RaidItemRow
+              v-for="(it, i) in outcome.items"
+              :key="`o${i}`"
+              :item="it"
+              :muted="outcome.status === 'Died'"
+            />
+          </div>
+          <p v-else class="empty-line mono">
+            {{
+              outcome.status === 'Extracted' ? '귀속된 아이템이 없습니다.' : '소실된 아이템이 없습니다.'
+            }}
+          </p>
+        </div>
+
+        <p v-if="outcome.status === 'Extracted'" class="outcome-note mono">
+          획득/반입 아이템은 이제 <strong>창고(Stash)</strong>에 있습니다.
+        </p>
+        <p v-else class="outcome-note mono">창고(Stash)의 아이템은 안전합니다.</p>
+
+        <el-button size="large" class="return-btn" @click="onReturn">스테이징으로 복귀 →</el-button>
+      </section>
+    </div>
+
+    <div v-if="!loading && mode === 'prep' && !loadout" class="wx-empty">
+      <img class="pixel" src="/sprites/ammo_box.svg" alt="" />
+      Raid staging unavailable. Is the backend online?
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px;
+  align-items: start;
+}
+.stage.single {
+  grid-template-columns: minmax(0, 640px);
+  justify-content: center;
+}
+@media (max-width: 900px) {
+  .stage {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.grid-cap {
+  font-size: 11px;
+  color: var(--wx-text-faint);
+  letter-spacing: 1px;
+}
+.grid-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.hint {
+  font-size: 11px;
+  color: var(--wx-text-dim);
+  margin: 0 0 12px;
+  letter-spacing: 0.5px;
+}
+.link {
+  color: var(--wx-amber);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.w-full {
+  width: 100%;
+  margin-top: 12px;
+}
+
+/* ---- deploy panel ---- */
+.deploy-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.brief-list {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--wx-text-dim);
+  line-height: 1.9;
+}
+.deploy-btn {
+  width: 100%;
+  font-family: var(--wx-font-display);
+  letter-spacing: 2px;
+  font-weight: 800;
+  height: 52px;
+}
+.deploy-note {
+  font-size: 11px;
+  margin: 0;
+  text-align: center;
+}
+
+/* ---- active: manifest ---- */
+.risk-badge {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--wx-sell);
+  border: 1px solid var(--wx-sell-dim);
+  background: rgba(208, 85, 64, 0.12);
+  border-radius: 999px;
+  padding: 3px 10px;
+  letter-spacing: 1px;
+}
+.atrisk-warn {
+  font-size: 12px;
+  color: var(--wx-sell);
+  background: rgba(208, 85, 64, 0.08);
+  border: 1px solid var(--wx-sell-dim);
+  border-radius: var(--wx-r-sm);
+  padding: 8px 12px;
+  margin: 0 0 16px;
+}
+.manifest-group {
+  margin-bottom: 18px;
+}
+.group-label {
+  font-family: var(--wx-font-display);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.group-label.brought {
+  color: var(--wx-olive);
+}
+.group-label.looted {
+  color: var(--wx-amber-bright);
+}
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.empty-line {
+  font-size: 12px;
+  color: var(--wx-text-faint);
+  margin: 0;
+}
+
+/* ---- side column ---- */
+.side-col {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.loot-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+.loot-select {
+  width: 100%;
+}
+.loot-qty {
+  width: 100%;
+}
+.loot-btn {
+  width: 100%;
+}
+.resolve-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.resolve-btn {
+  width: 100%;
+  font-family: var(--wx-font-display);
+  letter-spacing: 2px;
+  font-weight: 800;
+  height: 48px;
+  margin-left: 0;
+}
+.resolve-note {
+  font-size: 11px;
+  margin: 0;
+  text-align: center;
+}
+
+/* ---- outcome ---- */
+.outcome-panel.survived {
+  border-color: var(--wx-buy-dim);
+  box-shadow: inset 0 0 60px rgba(109, 176, 106, 0.08);
+}
+.outcome-panel.killed {
+  border-color: var(--wx-sell-dim);
+  box-shadow: inset 0 0 60px rgba(208, 85, 64, 0.1);
+}
+.outcome-head {
+  text-align: center;
+  margin-bottom: 20px;
+}
+.outcome-title {
+  font-family: var(--wx-font-display);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+}
+.survived .outcome-title {
+  color: var(--wx-buy);
+}
+.killed .outcome-title {
+  color: var(--wx-sell);
+}
+.outcome-sub {
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--wx-text-dim);
+  margin-top: 6px;
+}
+.outcome-meta {
+  font-size: 11px;
+  color: var(--wx-text-faint);
+  margin-top: 4px;
+}
+.outcome-list {
+  margin-bottom: 16px;
+}
+.outcome-note {
+  font-size: 12px;
+  color: var(--wx-text-dim);
+  text-align: center;
+  margin: 0 0 18px;
+}
+.outcome-note strong {
+  color: var(--wx-amber-bright);
+}
+.return-btn {
+  width: 100%;
+  font-family: var(--wx-font-display);
+  letter-spacing: 1px;
+}
+</style>

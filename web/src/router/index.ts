@@ -30,6 +30,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/LoadoutView.vue'),
   },
   {
+    path: '/raid',
+    name: 'raid',
+    component: () => import('@/views/RaidView.vue'),
+  },
+  {
     path: '/wallet',
     name: 'wallet',
     component: () => import('@/views/WalletView.vue'),

@@ -26,6 +26,8 @@ export type ErrorCode =
   | 'OrderAlreadyClosed'
   | 'StackableMismatch'
   | 'PlacementInvalid'
+  | 'RaidActive'
+  | 'RaidNotFound'
 
 // ---- Common envelope ----
 export interface ApiError {
@@ -137,6 +139,36 @@ export interface MoveStashItemRequest {
   // Stacks may move a partial amount; omit/null moves the whole stack.
   // Instances always move whole.
   quantity?: number | null
+}
+
+// ---- Raid / Extraction ----
+// A raid session: the player deploys from their LOADOUT, optionally loots, then
+// resolves by extracting (items return to Stash) or dying (brought + looted lost).
+// Statuses/kinds/sources serialize PascalCase.
+export type RaidStatus = 'Active' | 'Extracted' | 'Died'
+export type RaidItemKind = 'Stack' | 'Instance'
+export type RaidItemSource = 'Brought' | 'Looted'
+
+export interface RaidSessionItemDto {
+  kind: RaidItemKind
+  templateId: number
+  instanceId?: string | null
+  quantity: number
+  source: RaidItemSource
+}
+
+export interface RaidSessionDto {
+  id: string
+  playerId: string
+  status: RaidStatus
+  startedAt: string
+  resolvedAt?: string | null
+  items: RaidSessionItemDto[]
+}
+
+export interface AddLootRequest {
+  templateId: number
+  quantity: number
 }
 
 // ---- Wallet ----

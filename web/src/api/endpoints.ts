@@ -1,5 +1,6 @@
 import { api } from './client'
 import type {
+  AddLootRequest,
   AdminAdjustWalletRequest,
   AdminForceCancelOrderRequest,
   AdminGrantInstanceRequest,
@@ -16,6 +17,7 @@ import type {
   PagedResult,
   PlaceOrderRequest,
   PlaceOrderResult,
+  RaidSessionDto,
   RefreshRequest,
   StashDto,
   TokenResponse,
@@ -52,6 +54,17 @@ export const stashApi = {
     api.get<StashDto>(`/api/stash/${container.toLowerCase()}`),
   // move returns the toContainer's snapshot; callers reconcile the fromContainer separately.
   move: (body: MoveStashItemRequest) => api.post<StashDto>('/api/stash/move', body),
+}
+
+// ---- Raid / Extraction ----
+// GET returns the *active* raid or null (resolved raids aren't returned).
+// start/loot/extract/die return the affected RaidSessionDto.
+export const raidApi = {
+  get: () => api.get<RaidSessionDto | null>('/api/raid'),
+  start: () => api.post<RaidSessionDto>('/api/raid/start'),
+  loot: (body: AddLootRequest) => api.post<RaidSessionDto>('/api/raid/loot', body),
+  extract: () => api.post<RaidSessionDto>('/api/raid/extract'),
+  die: () => api.post<RaidSessionDto>('/api/raid/die'),
 }
 
 export const marketApi = {

@@ -169,3 +169,10 @@ export function onWalletChanged(handler: WalletHandler): () => void {
   walletHandlers.add(handler)
   return () => walletHandlers.delete(handler)
 }
+
+// Manually fan out a WalletChanged to subscribers. Use after a local mutation that
+// changes a player's balance/holdings but doesn't round-trip through the hub (e.g.
+// resolving a raid), so the header caps chip refreshes without a page reload.
+export function notifyWalletChanged(): void {
+  walletHandlers.forEach((h) => h())
+}

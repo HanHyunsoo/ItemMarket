@@ -24,6 +24,7 @@ const navItems = computed(() => {
     { name: 'inventory', label: 'Stash' },
     { name: 'stash', label: 'Grid' },
     { name: 'loadout', label: '장비' },
+    { name: 'raid', label: '출격' },
     { name: 'wallet', label: 'Wallet' },
     { name: 'orders', label: 'Orders' },
   ]
