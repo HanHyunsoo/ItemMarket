@@ -4,7 +4,7 @@
 `ApiResponse<T>`(`Success` / `Data` / `Error`)로 감싼다. 열거형은 문자열로 직렬화한다.
 
 > **인터랙티브 문서(Swagger/OpenAPI)**: API를 띄운 뒤 [`/swagger`](http://localhost:5080/swagger)
-> 에서 모든 엔드포인트를 그룹(Auth/Market/Wallet/Orders/Stash/Inventory/Admin)별로 보고 직접
+> 에서 모든 엔드포인트를 그룹(Auth/Market/Wallet/Orders/Stash/Inventory/Raid/Admin)별로 보고 직접
 > 호출할 수 있다. 우측 상단 **Authorize** 에 로그인으로 받은 액세스 토큰을 넣으면 JWT Bearer로
 > 보호된 엔드포인트를 시험할 수 있다.
 
@@ -67,7 +67,7 @@
 | GET | `/api/orders` | - | `OrderDto[]` (내 주문) |
 | GET | `/api/orders/{id}` | - | `OrderDto` |
 | DELETE | `/api/orders/{id}` | - | `OrderDto` (취소, 에스크로 환불) |
-| GET | `/api/raid` | - | `RaidSessionDto?` (현재/최근 세션, 이력 없으면 `null`) |
+| GET | `/api/raid` | - | `RaidSessionDto?` (**ACTIVE 세션만 반환, 없으면 `null`**) |
 | POST | `/api/raid/start` | - | `RaidSessionDto` (로드아웃을 위험으로 잠금, ACTIVE) |
 | POST | `/api/raid/loot` | `AddLootRequest` | `RaidSessionDto` (전리품 추가) |
 | POST | `/api/raid/extract` | - | `RaidSessionDto` (생존 → 전량 소유 복귀, EXTRACTED) |
@@ -145,6 +145,9 @@
   `RaidSessionDto.Status`(`Active`\|`Extracted`\|`Died`, PascalCase 직렬화).
 - **플레이어당 ACTIVE 세션 1개**: 진행 중 다시 `start`하면 `RaidActive`(**409**). DB의 부분 유니크
   인덱스(`WHERE status='ACTIVE'`)가 최종 강제. `extract`/`die`/`loot`에 ACTIVE 세션이 없으면 `RaidNotFound`(**404**).
+- **`GET /api/raid`**: **ACTIVE 세션만** 스냅샷으로 반환하고, 진행 중 레이드가 없으면 `null`이다
+  (계약: `null` = 진행 중 레이드 없음). 해결된(EXTRACTED/DIED) 세션은 반환하지 않는다 — 결과 화면은
+  `extract`/`die` 응답으로 표시한다.
 - **StartRaid(원자적, 매도 에스크로와 동일한 자산 잠금 재사용)**: 로드아웃 스택은 `inventory_stack`에서
   차감, 유니크는 `item_instance.owner_player_id = NULL`. 로드아웃 배치를 비우고 위험 스냅샷
   `raid_session_item`(source=`BROUGHT`)에 기록한다. 위험 아이템은 인벤에서 사라지므로 **레이드 중
@@ -166,12 +169,15 @@
 
 - 요청에 `Idempotency-Key: <임의 문자열>` 헤더를 붙인다(선택). 헤더가 없으면 기존 동작 그대로.
 - 키는 **플레이어별**로 유일해야 한다. 슬롯은 `(player_id, key)`로 관리한다.
+- **저장소는 Redis**(`IIdempotencyStore` → `RedisIdempotencyStore`). 키는 `idem:{playerId}:{key}`,
+  TTL은 `Idempotency:TtlMinutes`(기본 60분). Redis 미구성(단일 인스턴스 개발) 시에는 무저장
+  `NullIdempotencyStore`로 폴백해 헤더를 사실상 무시한다(중복 방어 없음).
 - 처리 흐름:
-  1. 헤더가 있으면 `(player_id, key)` 슬롯을 원자적으로 선점(`INSERT ... ON CONFLICT DO NOTHING`).
-  2. 선점 성공(원본): 주문을 등록하고 직렬화된 `ApiResponse<PlaceOrderResult>` JSON을 저장 후 반환.
-  3. 선점 실패(중복): 저장된 응답을 **그대로** 반환한다(주문 재등록 없음).
-  4. 원본이 아직 처리 중(응답 미저장)이면 `409` + `ApiResponse`(`IdempotencyInProgress`).
-  5. 원본이 실패하면 슬롯을 비워 같은 키로 재시도 가능.
+  1. 헤더가 있으면 슬롯을 원자적으로 선점(`SET idem:{playerId}:{key} INFLIGHT NX EX ttl`).
+  2. 선점 성공(원본): 주문을 등록하고 직렬화된 `ApiResponse<PlaceOrderResult>` JSON을 슬롯에 저장 후 반환.
+  3. 선점 실패(중복, 저장된 응답 존재): 저장된 응답을 **그대로** 반환한다(주문 재등록 없음).
+  4. 원본이 아직 처리 중(값이 `INFLIGHT` 마커)이면 `409` + `ApiResponse`(`IdempotencyInProgress`).
+  5. 원본이 실패하면 슬롯을 삭제(`DEL`)해 같은 키로 재시도 가능.
 
 ## 레이트 리밋 (`POST /api/orders`)
 

@@ -160,3 +160,23 @@
   방향은 비활성화→재수화로 복구(C3 수정). ✅
 - 에스크로/주문 INSERT는 별도 tx이나 실패 시 보상으로 원복(C2 수정). 보상 실패 잔여 위험은 Critical 로그 +
   원장 추적으로 수동 복구 가능. ⚠️ (완전한 해결은 에스크로+INSERT 단일 tx화 — 후속 과제)
+
+---
+
+## 이후(부하테스트·기능 확장 중) 추가로 발견·수정
+
+초기 감사 이후 부하 테스트와 기능 확장(2-컨테이너 인벤토리·익스트랙션 레이드)을 진행하며 잡은 결함들.
+각 항목 **문제 → 수정** 한 줄 요약(상세 근거·수치는 `docs/perf-report.md`, 계약은 `docs/api-contract.md`).
+
+- **교차-grain 지갑 락 순서 데드락(40P01)** — 서로 다른 아이템 grain의 동시 정산이 같은 지갑 행을 다른
+  순서로 잠가 Postgres 데드락 → 정산 tx 시작에 지갑 행을 `ORDER BY player_id FOR UPDATE`로 일관 순서
+  선점(락 순서화). p99 973→175ms, 데드락 0.
+- **그리드 유니크 제약 버그** — 스택용 `(player, template)` 유니크 제약이 인스턴스 행에도 적용돼 같은
+  무기 2정 배치 시 `duplicate key` → **STACK 전용 부분 유니크 인덱스**(`WHERE kind='STACK'`, 컨테이너
+  포함)로 교정.
+- **raid 정산 롤백 중첩 버그** — StartRaid/Extract/Die 트랜잭션의 예외 처리에서 롤백이 중첩 호출되며
+  이미 롤백된 tx를 다시 되돌리려 함 → 단일 롤백 경로로 정리(`catch (PostgresException UniqueViolation)`은
+  RaidActive 도메인 에러로 매핑, 그 외는 롤백 후 rethrow).
+- **`GET /api/raid` 계약 정정** — "ACTIVE 우선, 없으면 최근 세션 반환"이 결과 화면 재조회 시 해결된
+  세션을 되돌려 UI가 혼란 → **ACTIVE 세션만 반환, 없으면 `null`**로 계약 축소(결과는 extract/die 응답으로
+  표시). `docs/api-contract.md` 반영.
