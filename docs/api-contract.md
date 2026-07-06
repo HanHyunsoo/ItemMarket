@@ -73,9 +73,9 @@
 | DELETE | `/api/orders/{id}` | - | `OrderDto` (취소, 에스크로 환불) |
 | GET | `/api/raid` | - | `RaidSessionDto?` (**ACTIVE 세션만 반환, 없으면 `null`**) |
 | GET | `/api/raid/history?page=&size=` | - | `PagedResult<RaidHistoryEntryDto>` (해결된 EXTRACTED/DIED 세션, 최신순) |
-| POST | `/api/raid/start` | - | `RaidSessionDto` (로드아웃을 위험으로 잠금, ACTIVE) |
-| POST | `/api/raid/loot` | `AddLootRequest` | `RaidSessionDto` (전리품 추가) |
-| POST | `/api/raid/extract` | - | `RaidSessionDto` (생존 → 전량 소유 복귀, EXTRACTED) |
+| POST | `/api/raid/start` | `StartRaidRequest?`(zone, 기본 Med) | `RaidSessionDto` (스태시 밖 전부를 위험으로 잠금, ACTIVE. 존이 드롭 등급·사망확률 결정) |
+| POST | `/api/raid/loot` | - | `LootResultDto` (서버 드롭: 존 rarity 가중치로 무엇을·얼마나 결정. `{dropped, session}`) |
+| POST | `/api/raid/extract` | - | `RaidSessionDto` (탈출 시도 → 마감/누적 사망확률로 EXTRACTED 또는 DIED 판정) |
 | POST | `/api/raid/die` | - | `RaidSessionDto` (위험 아이템 소실, DIED) |
 
 ## 운영(어드민) 엔드포인트
@@ -186,11 +186,12 @@
   `origin_container_instance_id`(중첩 백팩·리그), `origin_slot`(장착 슬롯), `origin_x`/`origin_y`(그리드 칸))
   — 생존 시 정확히 그 자리로 되돌리기 위함이다. 위험 아이템은 인벤에서 사라지므로 **레이드 중 판매/이동/배치가
   자동 거부**된다(기존 에스크로 검사가 그대로 거른다).
-- **AddLoot(MVP 시뮬레이션)**: ACTIVE 세션에 `LOOTED` 위험 아이템을 추가한다. 스택은 수량 스냅샷,
-  유니크는 `item_instance`를 `owner=NULL`·`origin='RAID'`로 즉시 생성(위험 상태)한다. 소유는 Extract 시 부여.
-  전리품 종류는 **요청 `Kind`가 아니라 템플릿의 `stackable` 플래그로 결정**한다 — 게임 서버가
-  `{TemplateId, Quantity}`만 보내도 유니크 템플릿이면 인스턴스를 materialize한다(loot-unique 버그 수정).
-  `AddLootRequest`: `Kind`(무시 가능), `TemplateId`, `Quantity`(스택), `Durability`/`Attachments`(유니크 선택).
+- **Loot = 서버 드롭테이블(scavenge)**: 클라이언트는 아이템·수량을 정하지 못한다(무한 인플레 차단).
+  서버가 세션 **존(zone)의 rarity 가중치**로 등급을 롤하고 그 등급의 `item_template` 중 랜덤 1종을 뽑아
+  `LOOTED` 위험 아이템으로 추가한다. 수량은 스택이면 `1..max_stack`(상한 초과 원천 불가), 유니크는
+  `item_instance`를 `owner=NULL`·`origin='RAID'`로 materialize(소유는 Extract 시 부여). 응답 `LootResultDto`는
+  이번 드롭(`dropped`)과 갱신 세션(`session`)을 함께 준다. loot마다 **존별 사망확률**(Low +8% / Med +12% /
+  High +20% /loot)이 오른다. 마감 초과로 loot하면 탈출 실패=사망 정산(`dropped=null`, `session.status=Died`).
 - **Extract = 보존 + 원위치 복원**: 반입(`BROUGHT`) + 획득(`LOOTED`) 전량을 소유로 복귀(스택 가산 /
   유니크 owner 복원)한 뒤, 물리 위치를 **한 트랜잭션 안에서** 복원한다 — STASH로 자동 덤프하지 않는다.
   - **반입(BROUGHT)**: StartRaid에서 스냅샷한 `origin_*`으로 정확히 되돌린다 — `EQUIP`은 `player_equipment`
