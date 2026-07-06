@@ -258,8 +258,9 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       StartRaid/Resolve의 앱시각↔DB `now()` 불일치도 없앴다. 회귀 테스트
       `RaidTests.Raid_timestamps_come_from_db_and_startedat_is_stable_across_loot` 추가.
       (`MarketRepository.cs`)
-- [ ] **BUG D** loot 수량 상한 — `AddLootAsync`에서 `max_stack` 기준 검증/분할(현재 `1..1_000_000`만).
-      (`MarketRepository.cs:1205`)
+- [x] **BUG D** loot 수량 상한 — `AddLootAsync`가 `max_stack` 기준으로 검증(초과 시 `ValidationError`).
+      한 번의 픽업은 한 스택 상한을 넘을 수 없다(무한 픽업 차단). Extract 시점 인벤 분할 배치는 유지.
+      회귀 테스트 `RaidTests.Loot_quantity_over_max_stack_is_rejected` 추가. (`MarketRepository.cs`)
 - [ ] **L2/BUG4** 음수·0·null Quantity 검증 — 빈 풀 분기에도 하한 검증 추가(`ValidationError`).
       (`MarketRepository.cs:459-468`)
 - [ ] **L7** `fee_bps` `[0,10000]` 클램프. (`MarketRepository.cs:37-43`)

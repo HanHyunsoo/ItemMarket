@@ -396,6 +396,30 @@ public class RaidTests(MarketAppFixture f)
         Assert.True(ex.Data.StartedAt <= ex.Data.ResolvedAt);
     }
 
+    // BUG D: 한 번의 loot 픽업은 한 스택 상한(max_stack)을 넘을 수 없다. 94(.45 ACP, AMMO)=60.
+    [Fact]
+    public async Task Loot_quantity_over_max_stack_is_rejected()
+    {
+        var e = await _f.AuthedAs(Echo);
+        await ClearAtRisk(Echo);
+        await ClearEquipment(e);
+        await GrantStack(Echo, 24, 3);
+        await Stash(e);
+        await BringStackToPockets(e, 24, 3, 0);
+        (await Start(e)).EnsureSuccessStatusCode();
+
+        // max_stack=60 초과 → 400 ValidationError.
+        var over = await Loot(e, new AddLootRequest(StashEntryKind.Stack, 94, 61));
+        Assert.Equal(HttpStatusCode.BadRequest, over.StatusCode);
+        Assert.Equal(ErrorCode.ValidationError, (await Api<RaidSessionDto>(over)).Error!.Code);
+
+        // 상한(60) 이하는 성공.
+        var ok = await Loot(e, new AddLootRequest(StashEntryKind.Stack, 94, 60));
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+
+        (await Die(e)).EnsureSuccessStatusCode(); // 정리(active 세션 미잔존)
+    }
+
     // 원자성(best-effort 폴트 인젝션): 정산 도중 실패하면 전량 롤백된다.
     // 주머니 수량과 inventory_stack을 어긋나게(외부 변조) 만들어 StartRaid 스택 가드를 실패시키고,
     // 같은 트랜잭션에서 먼저 INSERT된 raid_session이 롤백되는지(ACTIVE 세션 미생성) 검증한다.

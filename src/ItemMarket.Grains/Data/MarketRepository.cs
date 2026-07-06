@@ -1183,10 +1183,11 @@ public sealed class MarketRepository(string connectionString)
         await using var db = Open();
 
         var tpl = await db.QuerySingleOrDefaultAsync(
-            "SELECT stackable, max_durability FROM item_template WHERE id = @id", new { id = req.TemplateId });
+            "SELECT stackable, max_durability, max_stack FROM item_template WHERE id = @id", new { id = req.TemplateId });
         if (tpl is null)
             throw new DomainException(ErrorCode.TemplateNotFound, "아이템 템플릿을 찾을 수 없습니다.");
         bool stackable = (bool)tpl.stackable;
+        int maxStack = (int)tpl.max_stack;
 
         await using var tx = await db.BeginTransactionAsync();
         try
@@ -1202,8 +1203,10 @@ public sealed class MarketRepository(string connectionString)
             if (stackable)
             {
                 var qty = req.Quantity ?? 1;
-                if (qty < 1 || qty > 1_000_000)
-                    throw new DomainException(ErrorCode.ValidationError, "전리품 수량은 1 이상 1,000,000 이하이어야 합니다.");
+                // 한 번의 전리품 픽업은 한 스택 상한(max_stack)을 넘을 수 없다. Extract 시점의 인벤 분할
+                // 배치는 별개로 유지되지만, loot 자체는 도메인상 단일 픽업이라 상한 초과를 거부한다(무한 픽업 차단).
+                if (qty < 1 || qty > maxStack)
+                    throw new DomainException(ErrorCode.ValidationError, $"전리품 수량은 1 이상 {maxStack} 이하이어야 합니다.");
                 await db.ExecuteAsync(
                     @"INSERT INTO raid_session_item(session_id, kind, template_id, instance_id, quantity, source)
                       VALUES (@sessionId, 'STACK', @templateId, NULL, @qty, 'LOOTED')",
