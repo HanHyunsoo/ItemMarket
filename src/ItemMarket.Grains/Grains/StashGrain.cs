@@ -69,8 +69,19 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
         return BuildSnapshot(new ContainerRef(GridContainer.Container, containerInstanceId), placements, ctx);
     }
 
+    /// <summary>레이드 ACTIVE 중에는 스태시/장비 변이를 잠근다(A-1). 반입 아이템은 필드에 나가 있고,
+    /// 변이를 허용하면 비운 슬롯/칸에 예비품이 들어가 Extract 원위치 복원이 고유 제약과 충돌한다.
+    /// "레이드 중 로드아웃 잠금" 시맨틱과도 일관.</summary>
+    private async Task EnsureNoActiveRaidAsync()
+    {
+        if (await repo.HasActiveRaidAsync(PlayerId))
+            throw new DomainException(ErrorCode.RaidActive,
+                "레이드 진행 중에는 스태시·장비를 변경할 수 없습니다. 먼저 탈출하거나 사망 처리하세요.");
+    }
+
     public async Task<StashDto> MoveItem(MoveStashItemRequest req)
     {
+        await EnsureNoActiveRaidAsync();
         var ctx = await LoadAsync();
         // 이동 전에 정합화: 아직 배치되지 않은 아이템도 STASH에 존재하도록 해 원본 컨테이너 조회가 성립한다.
         await ReconcileAsync(ctx);
@@ -130,6 +141,7 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
 
     public async Task<EquipmentDto> Equip(EquipRequest req)
     {
+        await EnsureNoActiveRaidAsync();
         await repo.EquipAsync(PlayerId, req.Slot, req.InstanceId);
         var ctx = await LoadAsync();
         await ReconcileAsync(ctx);
@@ -138,6 +150,7 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
 
     public async Task<EquipmentDto> Unequip(UnequipRequest req)
     {
+        await EnsureNoActiveRaidAsync();
         await repo.UnequipAsync(PlayerId, req.Slot);
         var ctx = await LoadAsync();
         await ReconcileAsync(ctx);

@@ -60,6 +60,11 @@ public class RaidTests(MarketAppFixture f)
     {
         await using var db = new NpgsqlConnection(_f.ConnString);
         await db.OpenAsync();
+        // 잔존 ACTIVE 세션을 닫는다 — 레이드 중 스태시/장비 변이가 잠기므로(A-1),
+        // 앞 테스트가 남긴 진행 중 세션이 있으면 다음 테스트의 셋업(unequip/move)이 RaidActive로 막힌다.
+        await db.ExecuteAsync(
+            "UPDATE raid_session SET status = 'DIED', resolved_at = now() WHERE player_id = @p AND status = 'ACTIVE'",
+            new { p = player });
         await db.ExecuteAsync(
             "DELETE FROM stash_placement WHERE player_id = @p AND container IN ('POCKETS','CONTAINER')",
             new { p = player });
@@ -164,10 +169,10 @@ public class RaidTests(MarketAppFixture f)
         Assert.False(sellStack.Success);
         Assert.Equal(ErrorCode.InsufficientQuantity, sellStack.Error!.Code);
 
-        // 배치(이동) 시도: 소유 아님 → PlacementInvalid.
+        // 배치(이동) 시도: 레이드 중이므로 RaidActive로 잠긴다(A-1 — 소유 검증보다 앞선 가드).
         var mv = await Move(d, new MoveStashItemRequest(StashEntryKind.Instance, null, pistol, 0, 0));
-        Assert.Equal(HttpStatusCode.BadRequest, mv.StatusCode);
-        Assert.Equal(ErrorCode.PlacementInvalid, (await Api<StashDto>(mv)).Error!.Code);
+        Assert.Equal(HttpStatusCode.Conflict, mv.StatusCode);
+        Assert.Equal(ErrorCode.RaidActive, (await Api<StashDto>(mv)).Error!.Code);
 
         // 정리: 탈출로 원복(다음 테스트에 ACTIVE 세션을 남기지 않음).
         (await Extract(d)).EnsureSuccessStatusCode();
@@ -418,6 +423,45 @@ public class RaidTests(MarketAppFixture f)
         Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
 
         (await Die(e)).EnsureSuccessStatusCode(); // 정리(active 세션 미잔존)
+    }
+
+    // A-1: 레이드 ACTIVE 중 스태시/장비 변이는 RaidActive(409)로 잠긴다. 잠그지 않으면 비운 슬롯/칸에
+    // 예비품이 들어가 Extract 원위치 복원이 고유 제약과 충돌해 500 + 세션 소프트락이 났다.
+    [Fact]
+    public async Task Stash_and_equipment_mutations_are_locked_during_active_raid()
+    {
+        var e = await _f.AuthedAs(Echo);
+        await ClearAtRisk(Echo);
+        await ClearEquipment(e);
+
+        var pistol = await GrantInstance(Echo, Pistol, 300);
+        await GrantStack(Echo, 24, 3);
+        await Stash(e);
+        await BringStackToPockets(e, 24, 3, 0);
+        await Equip(e, EquipSlot.Weapon, pistol);
+        (await Start(e)).EnsureSuccessStatusCode();
+
+        // 예비 무기를 STASH에 두고 레이드 중 착용 시도 → 409 RaidActive.
+        var spare = await GrantInstance(Echo, Pistol, 250);
+        await Stash(e);
+        var eq = await e.PostAsJsonAsync("/api/equipment/equip", new EquipRequest(EquipSlot.Weapon, spare), Json);
+        Assert.Equal(HttpStatusCode.Conflict, eq.StatusCode);
+        Assert.Equal(ErrorCode.RaidActive, (await Api<EquipmentDto>(eq)).Error!.Code);
+
+        // 이동도 레이드 중 409.
+        var mv = await e.PostAsJsonAsync("/api/stash/move",
+            new MoveStashItemRequest(StashEntryKind.Stack, 24, null, 2, 0), Json);
+        Assert.Equal(HttpStatusCode.Conflict, mv.StatusCode);
+        Assert.Equal(ErrorCode.RaidActive, (await Api<StashDto>(mv)).Error!.Code);
+
+        // 핵심 회귀: 변이가 잠겨 있으므로 Extract가 500 없이 성공하고 원위치로 복원된다.
+        var ex = await Api<RaidSessionDto>(await Extract(e));
+        Assert.True(ex.Success);
+        Assert.Equal(RaidStatus.Extracted, ex.Data!.Status);
+
+        // 탈출 후에는 변이가 다시 허용된다(잠금 해제).
+        var un = await e.PostAsJsonAsync("/api/equipment/unequip", new UnequipRequest(EquipSlot.Weapon), Json);
+        Assert.Equal(HttpStatusCode.OK, un.StatusCode);
     }
 
     // 원자성(best-effort 폴트 인젝션): 정산 도중 실패하면 전량 롤백된다.

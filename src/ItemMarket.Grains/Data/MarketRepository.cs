@@ -1022,6 +1022,17 @@ public sealed class MarketRepository(string connectionString)
 
     /// <summary>현재 ACTIVE 레이드 세션 스냅샷. 활성 세션이 없으면 null(계약: null = 진행 중 레이드 없음).
     /// 해결된(EXTRACTED/DIED) 세션은 반환하지 않는다 — 결과 화면은 extract/die 응답으로 표시한다.</summary>
+    /// <summary>플레이어에게 진행 중(ACTIVE) 레이드 세션이 있는가. 레이드 중에는 스태시/장비 변이를
+    /// 잠가야 한다 — 반입 아이템은 필드에 나가 있고, 변이를 허용하면 Extract 원위치 복원이 새 배치와
+    /// 고유 제약(슬롯/셀)에서 충돌해 정산이 깨진다(A-1).</summary>
+    public async Task<bool> HasActiveRaidAsync(Guid playerId)
+    {
+        await using var db = Open();
+        return await db.ExecuteScalarAsync<bool>(
+            "SELECT EXISTS(SELECT 1 FROM raid_session WHERE player_id = @playerId AND status = 'ACTIVE')",
+            new { playerId });
+    }
+
     public async Task<RaidSessionDto?> GetRaidSnapshotAsync(Guid playerId)
     {
         await using var db = Open();
