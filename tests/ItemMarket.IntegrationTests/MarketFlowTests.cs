@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using ItemMarket.Contracts.Admin;
 using ItemMarket.Contracts.Common;
 using ItemMarket.Contracts.Items;
+using ItemMarket.Contracts.Leaderboard;
 using ItemMarket.Contracts.Orders;
 using ItemMarket.Contracts.Trades;
 using ItemMarket.Contracts.Wallet;
@@ -245,5 +246,34 @@ public class MarketFlowTests(MarketAppFixture f)
         Assert.Null(dead.BestBid);
         Assert.Null(dead.BestAsk);
         Assert.Null(dead.LastPrice);
+    }
+
+    // fun#8: 리더보드 — 최다 캡은 잔액 내림차순, 최다 탈출은 EXTRACTED 세션 수. 공유 상태라 절대 순위
+    // 대신 구조를 검증한다(캡 내림차순 정렬 + 잔액을 크게 올린 플레이어가 1위).
+    [Fact]
+    public async Task Leaderboard_ranks_top_caps_descending()
+    {
+        var admin = await _f.AuthedAs(Charlie);
+        // Bravo 잔액을 압도적으로 올려 캡 1위로 만든다.
+        (await admin.PostAsJsonAsync("/api/admin/wallet/adjust",
+            new AdminAdjustWalletRequest(Bravo, 9_000_000, "leaderboard test"), Json)).EnsureSuccessStatusCode();
+
+        var lb = await Api<LeaderboardDto>(await admin.GetAsync("/api/leaderboard"));
+        Assert.True(lb.Success);
+        Assert.NotEmpty(lb.Data!.TopCaps);
+
+        // 캡은 잔액 내림차순으로 정렬돼야 한다(인접 비교).
+        var caps = lb.Data.TopCaps;
+        for (var i = 1; i < caps.Count; i++)
+            Assert.True(caps[i - 1].Value >= caps[i].Value, "TopCaps not sorted descending");
+
+        // 방금 크게 올린 Bravo가 캡 1위.
+        Assert.Equal(Bravo, caps[0].PlayerId);
+        Assert.NotEmpty(caps[0].DisplayName);
+
+        // 탈출 순위도 내림차순(값이 있으면).
+        var ex = lb.Data.TopExtractions;
+        for (var i = 1; i < ex.Count; i++)
+            Assert.True(ex[i - 1].Value >= ex[i].Value, "TopExtractions not sorted descending");
     }
 }

@@ -16,6 +16,10 @@ public static class MarketEndpoints
         // 전 종목 시세 요약(마켓 카드용): 최우선 호가·최근 체결·활성 주문 수를 한 번에.
         api.MapGet("/market/tickers", (MarketRepository repo) => Exec(() => repo.GetTickersAsync()));
 
+        // 리더보드: 최다 캡 + 최다 생환(탈출) 상위 순위.
+        api.MapGet("/leaderboard", (MarketRepository repo) => Exec(() => repo.GetLeaderboardAsync()))
+            .WithTags("Leaderboard");
+
         api.MapGet("/market/{templateId:int}/book", (int templateId, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IOrderBookGrain>(templateId).GetSnapshot()));
 

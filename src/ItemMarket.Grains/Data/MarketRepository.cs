@@ -2,6 +2,7 @@ using Dapper;
 using ItemMarket.Contracts.Common;
 using ItemMarket.Contracts.Equipment;
 using ItemMarket.Contracts.Items;
+using ItemMarket.Contracts.Leaderboard;
 using ItemMarket.Contracts.Orders;
 using ItemMarket.Contracts.Raid;
 using ItemMarket.Contracts.Stash;
@@ -873,6 +874,32 @@ public sealed class MarketRepository(
         (Guid)r.id, (Guid)r.player_id, Enums.ToSide((string)r.side), (int)r.template_id,
         (long)r.unit_price, (int)r.quantity, (int)r.remaining_quantity, (Guid?)r.instance_id,
         Enums.ToStatus((string)r.status), (long)r.escrow_caps, (DateTimeOffset)r.created_at);
+
+    /// <summary>
+    /// 리더보드: 최다 캡 보유(지갑 잔액 내림차순)와 최다 생환(EXTRACTED 세션 수) 상위 N명.
+    /// 경제에 판돈이 생긴 뒤의 사회적 목표(#8). 이름 동률은 표시명으로 안정 정렬.
+    /// </summary>
+    public async Task<LeaderboardDto> GetLeaderboardAsync(int limit = 10)
+    {
+        await using var db = Open();
+
+        var caps = (await db.QueryAsync(
+            @"SELECT p.id, p.display_name, w.balance AS value
+              FROM player p JOIN wallet w ON w.player_id = p.id
+              ORDER BY w.balance DESC, p.display_name
+              LIMIT @limit", new { limit }))
+            .Select(r => new LeaderEntryDto((Guid)r.id, (string)r.display_name, (long)r.value)).ToList();
+
+        var extractions = (await db.QueryAsync(
+            @"SELECT p.id, p.display_name, count(rs.id) AS value
+              FROM player p JOIN raid_session rs ON rs.player_id = p.id AND rs.status = 'EXTRACTED'
+              GROUP BY p.id, p.display_name
+              ORDER BY value DESC, p.display_name
+              LIMIT @limit", new { limit }))
+            .Select(r => new LeaderEntryDto((Guid)r.id, (string)r.display_name, (long)r.value)).ToList();
+
+        return new LeaderboardDto(caps, extractions);
+    }
 
     /// <summary>
     /// 전 종목 시세 요약(마켓 카드 목록용). 종목별 최우선 매수(MAX BUY)·매도(MIN SELL) 호가,
