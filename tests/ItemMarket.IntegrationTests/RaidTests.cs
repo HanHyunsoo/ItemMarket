@@ -464,6 +464,83 @@ public class RaidTests(MarketAppFixture f)
         Assert.Equal(HttpStatusCode.OK, un.StatusCode);
     }
 
+    // fun#1: 사망확률 0이면 extract는 확정 생존, ≥100%면 확정 사망(경계 결정론). GET에 필드 노출.
+    [Fact]
+    public async Task Extract_death_roll_is_deterministic_at_bounds()
+    {
+        var e = await _f.AuthedAs(Echo);
+        await ClearAtRisk(Echo);
+        await ClearEquipment(e);
+        await GrantStack(Echo, 24, 3);
+        await Stash(e);
+        var before = await StackQty(e, 24);                  // 다른 테스트 잔여 포함 총량(델타로 검증)
+        await BringStackToPockets(e, 24, 3, 0);
+        var started = await Api<RaidSessionDto>(await Start(e));
+        Assert.True(started.Success);
+        Assert.Equal(0, started.Data!.DeathChanceBps);       // 출격 시 0
+        Assert.NotNull(started.Data.DeadlineAt);              // 마감 존재
+
+        // death_chance_bps=10000(100%)으로 조작 → extract 확정 사망(at-risk 소실).
+        await using (var db = new NpgsqlConnection(_f.ConnString))
+        {
+            await db.OpenAsync();
+            await db.ExecuteAsync(
+                "UPDATE raid_session SET death_chance_bps = 10000 WHERE player_id = @p AND status = 'ACTIVE'",
+                new { p = Echo });
+        }
+        var died = await Api<RaidSessionDto>(await Extract(e));
+        Assert.True(died.Success);
+        Assert.Equal(RaidStatus.Died, died.Data!.Status);    // 탈출 시도했으나 확률로 사망
+        Assert.Equal(before - 3, await StackQty(e, 24));     // 반입한 3개 소실(미복귀)
+    }
+
+    // fun#1: 확률 0 상태의 extract는 확정 생존(보존).
+    [Fact]
+    public async Task Extract_with_zero_death_chance_survives()
+    {
+        var e = await _f.AuthedAs(Echo);
+        await ClearAtRisk(Echo);
+        await ClearEquipment(e);
+        await GrantStack(Echo, 24, 4);
+        await Stash(e);
+        var before = await StackQty(e, 24);
+        await BringStackToPockets(e, 24, 4, 0);
+        (await Start(e)).EnsureSuccessStatusCode();
+
+        var ex = await Api<RaidSessionDto>(await Extract(e));   // chance=0(fixture) → 확정 생존
+        Assert.Equal(RaidStatus.Extracted, ex.Data!.Status);
+        Assert.Equal(before, await StackQty(e, 24));           // 반입 스택 전량 귀속(보존)
+    }
+
+    // fun#1: 마감(deadline) 초과 후 extract/loot는 탈출 실패=사망으로 정산된다(lazy expiry).
+    [Fact]
+    public async Task Expired_deadline_forces_death_on_extract()
+    {
+        var e = await _f.AuthedAs(Echo);
+        await ClearAtRisk(Echo);
+        await ClearEquipment(e);
+        await GrantStack(Echo, 24, 3);
+        await Stash(e);
+        var before = await StackQty(e, 24);
+        await BringStackToPockets(e, 24, 3, 0);
+        (await Start(e)).EnsureSuccessStatusCode();
+
+        // 마감을 과거로 조작 → 만료.
+        await using (var db = new NpgsqlConnection(_f.ConnString))
+        {
+            await db.OpenAsync();
+            await db.ExecuteAsync(
+                "UPDATE raid_session SET deadline_at = now() - interval '1 second' WHERE player_id = @p AND status = 'ACTIVE'",
+                new { p = Echo });
+        }
+
+        // 만료 후 extract → 탈출 실패=사망.
+        var ex = await Api<RaidSessionDto>(await Extract(e));
+        Assert.True(ex.Success);
+        Assert.Equal(RaidStatus.Died, ex.Data!.Status);
+        Assert.Equal(before - 3, await StackQty(e, 24));       // 반입한 3개 소실
+    }
+
     // 원자성(best-effort 폴트 인젝션): 정산 도중 실패하면 전량 롤백된다.
     // 주머니 수량과 inventory_stack을 어긋나게(외부 변조) 만들어 StartRaid 스택 가드를 실패시키고,
     // 같은 트랜잭션에서 먼저 INSERT된 raid_session이 롤백되는지(ACTIVE 세션 미생성) 검증한다.

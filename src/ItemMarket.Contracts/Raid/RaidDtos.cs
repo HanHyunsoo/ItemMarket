@@ -40,7 +40,9 @@ public sealed record RaidSessionDto(
     RaidStatus Status,
     DateTimeOffset StartedAt,
     DateTimeOffset? ResolvedAt,
-    IReadOnlyList<RaidSessionItemDto> Items);
+    IReadOnlyList<RaidSessionItemDto> Items,
+    DateTimeOffset? DeadlineAt = null,   // ACTIVE 세션의 출격 마감(초과 시 탈출 실패=사망). 해결된 세션은 null.
+    int DeathChanceBps = 0);             // 현재 누적 사망확률(bps). extract 시 이 확률로 사망 롤. 표시는 min(10000).
 
 /// <summary>
 /// 레이드 이력 한 줄(해결된 세션: EXTRACTED/DIED). 결과 화면/전적 조회용.

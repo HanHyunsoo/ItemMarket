@@ -15,7 +15,10 @@ namespace ItemMarket.Grains.Data;
 /// Postgres 데이터 접근(Dapper). 얇은 리포지토리 + "정산" 트랜잭션 한 개.
 /// Postgres가 소스오브트루스이며 grain은 여기를 통해 상태를 읽고 쓴다.
 /// </summary>
-public sealed class MarketRepository(string connectionString)
+public sealed class MarketRepository(
+    string connectionString,
+    int raidDurationSeconds = 180,
+    int deathChancePerLootBps = 1200)
 {
     private NpgsqlConnection Open()
     {
@@ -1135,11 +1138,13 @@ public sealed class MarketRepository(string connectionString)
                 throw new DomainException(ErrorCode.RaidNothingToDeploy,
                     "반입할 아이템이 없습니다. 장비를 착용하거나 주머니에 물건을 채운 뒤 출격하세요.");
 
-            // 3) 세션 생성.
+            // 3) 세션 생성. 출격 마감(deadline)을 now() + 제한시간으로 설정 — 초과 후 extract/loot 시
+            //    탈출 실패=사망으로 정산한다(lazy expiry). death_chance_bps는 0에서 시작해 loot마다 상승.
             var sessionId = Guid.NewGuid();
             await db.ExecuteAsync(
-                "INSERT INTO raid_session(id, player_id, status) VALUES (@sessionId, @playerId, 'ACTIVE')",
-                new { sessionId, playerId }, tx);
+                @"INSERT INTO raid_session(id, player_id, status, deadline_at)
+                  VALUES (@sessionId, @playerId, 'ACTIVE', now() + make_interval(secs => @dur))",
+                new { sessionId, playerId, dur = raidDurationSeconds }, tx);
 
             // 4) 스택 반입: inventory_stack 차감(= 매도 에스크로 이동) + 스냅샷 + 원장 + 해당 배치 제거.
             foreach (var s in stackItems)
@@ -1233,6 +1238,11 @@ public sealed class MarketRepository(string connectionString)
     /// </summary>
     public async Task<RaidSessionDto> AddLootAsync(Guid playerId, AddLootRequest req)
     {
+        // 마감(deadline)을 넘긴 세션에 loot를 시도하면 탈출 실패=사망으로 정산한다(lazy expiry).
+        var timing = await GetActiveRaidTimingAsync(playerId);
+        if (timing is { Expired: true })
+            return await ResolveRaidAsync(playerId, extracted: false);
+
         await using var db = Open();
 
         var tpl = await db.QuerySingleOrDefaultAsync(
@@ -1283,6 +1293,11 @@ public sealed class MarketRepository(string connectionString)
                     new { sessionId, templateId = req.TemplateId, instanceId }, tx);
             }
 
+            // loot 성공 — 누적 사망확률을 올린다("한 상자 더"의 대가. extract에서 이 확률로 사망 롤).
+            await db.ExecuteAsync(
+                "UPDATE raid_session SET death_chance_bps = death_chance_bps + @inc WHERE id = @sessionId",
+                new { inc = deathChancePerLootBps, sessionId = sessionId.Value }, tx);
+
             var dto = await LoadRaidDtoAsync(db, tx, sessionId.Value, playerId, RaidStatus.Active);
             await tx.CommitAsync();
             return dto;
@@ -1294,13 +1309,32 @@ public sealed class MarketRepository(string connectionString)
         }
     }
 
+    /// <summary>ACTIVE 세션의 만료 여부(deadline 초과)와 누적 사망확률(bps)을 읽는다. 없으면 null.
+    /// 만료 판정은 DB now() 기준으로 해 앱-DB 시계차를 피한다.</summary>
+    private async Task<(bool Expired, int ChanceBps)?> GetActiveRaidTimingAsync(Guid playerId)
+    {
+        await using var db = Open();
+        var r = await db.QuerySingleOrDefaultAsync(
+            @"SELECT (deadline_at IS NOT NULL AND deadline_at < now()) AS expired, death_chance_bps
+              FROM raid_session WHERE player_id = @playerId AND status = 'ACTIVE'",
+            new { playerId });
+        if (r is null) return null;
+        return ((bool)r.expired, (int)r.death_chance_bps);
+    }
+
     /// <summary>
-    /// Extract(한 트랜잭션): ACTIVE→EXTRACTED. 반입+획득 전량을 소유로 복귀
-    /// (스택 가산 / 유니크 owner 복원). 복귀분은 소유 상태라 다음 GET /api/stash에서 STASH 자동 배치된다.
-    /// RAID_EXTRACT(반입)/RAID_LOOT(획득) 기록.
+    /// Extract 시도: 마감(deadline)을 넘겼으면 탈출 실패=사망으로 정산한다. 아니면 누적 사망확률로
+    /// 롤 — 성공하면 EXTRACTED(반입+획득 전량 소유·원위치 복원), 실패하면 DIED(전량 소실).
+    /// chance=0이면 항상 생존, chance≥100%면 항상 사망(경계는 결정론적). "한 상자 더 vs 지금 탈출" 도박.
+    /// 생존 시 RAID_EXTRACT(반입)/RAID_LOOT(획득) 기록.
     /// </summary>
     public async Task<RaidSessionDto> ExtractAsync(Guid playerId)
-        => await ResolveRaidAsync(playerId, extracted: true);
+    {
+        var t = await GetActiveRaidTimingAsync(playerId);
+        if (t is null) return await ResolveRaidAsync(playerId, extracted: true); // 없으면 ResolveRaid가 RaidNotFound
+        bool died = t.Value.Expired || Random.Shared.NextDouble() < t.Value.ChanceBps / 10000.0;
+        return await ResolveRaidAsync(playerId, extracted: !died);
+    }
 
     /// <summary>
     /// Die(한 트랜잭션): ACTIVE→DIED. 위험 아이템 전량 소실(스택 미복귀 / 유니크 tombstone: owner=NULL,
@@ -1599,7 +1633,7 @@ public sealed class MarketRepository(string connectionString)
         NpgsqlConnection db, NpgsqlTransaction? tx, Guid sessionId, Guid playerId, RaidStatus status)
     {
         var s = await db.QuerySingleAsync(
-            "SELECT started_at, resolved_at FROM raid_session WHERE id = @sessionId",
+            "SELECT started_at, resolved_at, deadline_at, death_chance_bps FROM raid_session WHERE id = @sessionId",
             new { sessionId }, tx);
         var items = (await db.QueryAsync(
             "SELECT kind, template_id, instance_id, quantity, source FROM raid_session_item WHERE session_id = @sessionId ORDER BY id",
@@ -1607,8 +1641,11 @@ public sealed class MarketRepository(string connectionString)
             .Select(r => new RaidSessionItemDto(
                 Enums.ToStashKind((string)r.kind), (int)r.template_id, (Guid?)r.instance_id,
                 (int)r.quantity, Enums.ToRaidSource((string)r.source))).ToList();
+        // deadline_at·death_chance_bps는 ACTIVE 세션에서만 의미가 있다(해결된 세션은 null/무시).
+        var deadlineAt = status == RaidStatus.Active ? (DateTimeOffset?)s.deadline_at : null;
+        var deathChanceBps = status == RaidStatus.Active ? (int)s.death_chance_bps : 0;
         return new RaidSessionDto(sessionId, playerId, status,
-            (DateTimeOffset)s.started_at, (DateTimeOffset?)s.resolved_at, items);
+            (DateTimeOffset)s.started_at, (DateTimeOffset?)s.resolved_at, items, deadlineAt, deathChanceBps);
     }
 
     private static Task InsertItemLedgerAsync(

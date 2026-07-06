@@ -34,8 +34,11 @@ builder.AddMarketOpenApi();
 // 레이트 리미팅(주문 등록, 플레이어별) — Infrastructure/RateLimiting.cs
 builder.AddMarketRateLimiting();
 
-// DI: 리포지토리(싱글턴, 소스오브트루스 = Postgres)
-builder.Services.AddSingleton(new MarketRepository(connString));
+// DI: 리포지토리(싱글턴, 소스오브트루스 = Postgres). 레이드 타이머·사망확률 파라미터는 설정("Raid:*")에서.
+builder.Services.AddSingleton(new MarketRepository(
+    connString,
+    cfg.GetValue("Raid:DurationSeconds", 180),
+    cfg.GetValue("Raid:DeathChancePerLootBps", 1200)));
 
 // 매칭 엔진 옵션 — 가격 밴드 샤딩 스위치(Market:PriceBandSize, 기본 0=비활성).
 // 0이면 OrderBookGrain이 기존과 동일하게 템플릿당 단일 호가창을 직접 매칭한다.

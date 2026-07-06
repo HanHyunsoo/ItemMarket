@@ -238,6 +238,8 @@ export interface RaidSessionDto {
   startedAt: string
   resolvedAt?: string | null
   items: RaidSessionItemDto[]
+  deadlineAt?: string | null // ACTIVE 세션 출격 마감(초과 시 탈출 실패=사망). 해결된 세션은 null.
+  deathChanceBps: number // 누적 사망확률(bps). extract 시 이 확률로 사망 롤. 표시는 min(10000).
 }
 
 // 전리품 종류는 Kind가 아니라 템플릿의 stackable로 서버가 결정한다(Kind는 무시). 스택이면
