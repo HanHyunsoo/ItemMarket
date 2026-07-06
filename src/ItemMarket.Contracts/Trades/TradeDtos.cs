@@ -17,3 +17,15 @@ public sealed record TradeDto(
     Guid? InstanceId,
     long FeeAmount,
     DateTimeOffset ExecutedAt);
+
+/// <summary>
+/// 종목 하나의 시세 요약(마켓 카드 목록용). 최우선 매수/매도 호가·최근 체결가·활동 신호를 담는다.
+/// 활성 주문/체결이 없는 종목은 BestBid/BestAsk/LastPrice/LastTradeAt이 null, OpenOrders=0("시장 없음").
+/// </summary>
+public sealed record MarketTickerDto(
+    int TemplateId,
+    long? BestBid,
+    long? BestAsk,
+    long? LastPrice,
+    DateTimeOffset? LastTradeAt,
+    int OpenOrders);

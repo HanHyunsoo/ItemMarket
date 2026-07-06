@@ -13,6 +13,9 @@ public static class MarketEndpoints
 
         api.MapGet("/catalog", (MarketRepository repo) => Exec(async () => await repo.GetCatalogAsync()));
 
+        // 전 종목 시세 요약(마켓 카드용): 최우선 호가·최근 체결·활성 주문 수를 한 번에.
+        api.MapGet("/market/tickers", (MarketRepository repo) => Exec(() => repo.GetTickersAsync()));
+
         api.MapGet("/market/{templateId:int}/book", (int templateId, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IOrderBookGrain>(templateId).GetSnapshot()));
 

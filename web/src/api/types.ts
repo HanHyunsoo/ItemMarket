@@ -344,6 +344,16 @@ export interface TradeDto {
   executedAt: string
 }
 
+// 종목 하나의 시세 요약(마켓 카드용). 활동 없는 종목은 best/last가 null, openOrders=0.
+export interface MarketTickerDto {
+  templateId: number
+  bestBid: number | null
+  bestAsk: number | null
+  lastPrice: number | null
+  lastTradeAt: string | null
+  openOrders: number
+}
+
 export interface PlaceOrderResult {
   order: OrderDto
   fills: TradeDto[]

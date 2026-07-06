@@ -821,6 +821,34 @@ public sealed class MarketRepository(
         (long)r.unit_price, (int)r.quantity, (int)r.remaining_quantity, (Guid?)r.instance_id,
         Enums.ToStatus((string)r.status), (long)r.escrow_caps, (DateTimeOffset)r.created_at);
 
+    /// <summary>
+    /// 전 종목 시세 요약(마켓 카드 목록용). 종목별 최우선 매수(MAX BUY)·매도(MIN SELL) 호가,
+    /// 최근 체결가/시각, 활성 주문 수를 한 번의 집계로 반환한다(카드마다 book/trades를 따로 치는
+    /// N+1을 피한다). 활동 없는 종목은 null/0으로 "시장 없음"을 나타낸다.
+    /// </summary>
+    public async Task<IReadOnlyList<MarketTickerDto>> GetTickersAsync()
+    {
+        await using var db = Open();
+        var rows = await db.QueryAsync(
+            @"SELECT t.id AS template_id,
+                (SELECT MAX(unit_price) FROM market_order o
+                   WHERE o.template_id = t.id AND o.side = 'BUY'
+                     AND o.status IN ('OPEN','PARTIALLY_FILLED')) AS best_bid,
+                (SELECT MIN(unit_price) FROM market_order o
+                   WHERE o.template_id = t.id AND o.side = 'SELL'
+                     AND o.status IN ('OPEN','PARTIALLY_FILLED')) AS best_ask,
+                (SELECT unit_price FROM trade tr
+                   WHERE tr.template_id = t.id ORDER BY tr.executed_at DESC LIMIT 1) AS last_price,
+                (SELECT MAX(executed_at) FROM trade tr WHERE tr.template_id = t.id) AS last_trade_at,
+                (SELECT count(*) FROM market_order o
+                   WHERE o.template_id = t.id AND o.status IN ('OPEN','PARTIALLY_FILLED')) AS open_orders
+              FROM item_template t
+              ORDER BY t.id");
+        return rows.Select(r => new MarketTickerDto(
+            (int)r.template_id, (long?)r.best_bid, (long?)r.best_ask, (long?)r.last_price,
+            (DateTimeOffset?)r.last_trade_at, (int)r.open_orders)).ToList();
+    }
+
     // ======================================================================
     //  취소(에스크로 환불) — 한 트랜잭션
     // ======================================================================

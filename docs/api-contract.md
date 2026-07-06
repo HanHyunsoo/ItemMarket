@@ -65,6 +65,7 @@
 | GET | `/api/equipment` | - | `EquipmentDto` (장착 슬롯 + 장착된 백팩/리그의 중첩 그리드) |
 | POST | `/api/equipment/equip` | `EquipRequest` | `EquipmentDto` (장착 후 스냅샷) |
 | POST | `/api/equipment/unequip` | `UnequipRequest` | `EquipmentDto` (해제 후 스냅샷) |
+| GET | `/api/market/tickers` | - | `MarketTickerDto[]` (전 종목 시세 요약: 최우선 매수/매도 호가·최근 체결가/시각·활성 주문 수. 마켓 카드 목록용) |
 | GET | `/api/market/{templateId}/book` | - | `OrderBookSnapshotDto` (호가창) |
 | GET | `/api/market/{templateId}/trades?page=&size=` | - | `PagedResult<TradeDto>` (체결 내역) |
 | POST | `/api/orders` | `PlaceOrderRequest` | `PlaceOrderResult` (잔여 주문 + 즉시 체결분) |

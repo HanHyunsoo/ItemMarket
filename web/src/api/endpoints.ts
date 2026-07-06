@@ -18,6 +18,7 @@ import type {
   OrderStatus,
   PagedResult,
   LootResultDto,
+  MarketTickerDto,
   PlaceOrderRequest,
   PlaceOrderResult,
   RaidHistoryEntryDto,
@@ -88,6 +89,7 @@ export const raidApi = {
 }
 
 export const marketApi = {
+  tickers: () => api.get<MarketTickerDto[]>('/api/market/tickers'),
   book: (templateId: number) => api.get<OrderBookSnapshotDto>(`/api/market/${templateId}/book`),
   trades: (templateId: number, page: number, size: number) =>
     api.get<PagedResult<TradeDto>>(`/api/market/${templateId}/trades`, { page, size }),

@@ -209,4 +209,41 @@ public class MarketFlowTests(MarketAppFixture f)
         Assert.Contains(afterInst.Data!.Items,
             l => l.Reason == ItemLedgerReason.AdminGrant && l.InstanceId == g.Data!.Id && l.DeltaQty == 1);
     }
+
+    // fun#2: 마켓 시세 배치(tickers)가 최우선 호가·최근 체결·활성 주문 수를 종목별로 반영한다.
+    [Fact]
+    public async Task Tickers_reflect_best_quotes_last_trade_and_open_orders()
+    {
+        var admin = await _f.AuthedAs(Charlie);
+        var seller = await _f.AuthedAs(Bravo);
+        var buyer = await _f.AuthedAs(Alpha);
+        const int tid = 5; // 복숭아 통조림(FOOD, stackable) — 통합 테스트에서 호가가 안 쓰이는 종목
+
+        // 매도 3@50(잔존) + 매수 40@2(미체결 잔존) + 매수 50@1(매도와 체결 → 최근 체결가 50).
+        (await admin.PostAsJsonAsync("/api/admin/grant/stack", new AdminGrantStackRequest(Bravo, tid, 3), Json))
+            .EnsureSuccessStatusCode();
+        (await seller.PostAsJsonAsync("/api/orders", new PlaceOrderRequest(OrderSide.Sell, tid, 50, 3), Json))
+            .EnsureSuccessStatusCode();
+        (await buyer.PostAsJsonAsync("/api/orders", new PlaceOrderRequest(OrderSide.Buy, tid, 40, 2), Json))
+            .EnsureSuccessStatusCode();
+        (await buyer.PostAsJsonAsync("/api/orders", new PlaceOrderRequest(OrderSide.Buy, tid, 50, 1), Json))
+            .EnsureSuccessStatusCode();
+
+        var tickers = await Api<IReadOnlyList<MarketTickerDto>>(await buyer.GetAsync("/api/market/tickers"));
+        Assert.True(tickers.Success);
+        Assert.Equal(149, tickers.Data!.Count); // 전 종목 반환
+
+        var t = tickers.Data.Single(x => x.TemplateId == tid);
+        Assert.Equal(40L, t.BestBid);        // 미체결 매수 40 잔존
+        Assert.Equal(50L, t.BestAsk);        // 매도 50 잔존(3-1=2)
+        Assert.Equal(50L, t.LastPrice);      // 방금 체결가
+        Assert.NotNull(t.LastTradeAt);
+        Assert.True(t.OpenOrders >= 2);      // 매도 잔여 + 매수40 잔여
+
+        // 활동 없는 종목은 전부 null·0("시장 없음").
+        var dead = tickers.Data.First(x => x.OpenOrders == 0 && x.LastTradeAt == null);
+        Assert.Null(dead.BestBid);
+        Assert.Null(dead.BestAsk);
+        Assert.Null(dead.LastPrice);
+    }
 }
