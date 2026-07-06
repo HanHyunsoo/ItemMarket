@@ -313,7 +313,10 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 - [x] **#5** 목적 있는 캡 싱크 — 캡으로 스태시 행 확장(+6행, 점증 가격) `POST /api/stash/upgrade`.
       #3로 유한해진 loot 경제에 "파밍→거래→창고 확장" 루프를 닫는다. GearView에 확장 버튼(다음 가격).
       (`MarketRepository.UpgradeStashRowsAsync`, `GearView.vue`) — 내구도/수리·보험·출격 수수료는 향후.
-- [ ] **#6** 첫 방문 온보딩(루프 설명 스트립/오버레이). `[하]`
-- [ ] **#7** 이중어 네비 통일 + Stash/Gear 명칭 충돌 해소. `[하]`
-- [ ] **#9** 출격 매니페스트에 총 at-risk 가치(캡) 표시. `[하]`
+- [x] **#6** 첫 방문 온보딩 — 마켓 랜딩에 루프 설명 스트립(출격→탈출/사망→거래→확장), localStorage로
+      1회성 dismiss. (`MarketView.vue`)
+- [x] **#7** 이중어 네비 통일(Market·마켓 … Admin·운영) + Stash/Gear 명칭 충돌 해소(소지품 목록=Inventory·
+      소지품, 그리드 창고=Gear·장비). (`AppHeader.vue`, `InventoryView.vue`)
+- [x] **#9** 출격 매니페스트 at-risk 캡가치 — "N점"(수량 합 오도)을 사망 시 잃는 총 캡 가치(기준가×수량)로
+      교체. (`RaidView.vue`)
 - [ ] **#8** 희귀 전리품 추격 + 리더보드(경제에 판돈 생긴 뒤). `[중]`

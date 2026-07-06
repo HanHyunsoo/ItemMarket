@@ -20,6 +20,18 @@ const rarity = ref<ItemRarity | ''>('')
 
 const CATEGORIES: ItemCategory[] = ['Food', 'Medical', 'Melee', 'Gun', 'Ammo']
 
+// 첫 방문 온보딩: 루프를 한 줄로 설명하고, 닫으면 localStorage에 기억해 다시 보이지 않는다(#6).
+const ONBOARD_KEY = 'wx.onboarded.v1'
+const showOnboarding = ref(false)
+function dismissOnboarding(): void {
+  showOnboarding.value = false
+  try {
+    localStorage.setItem(ONBOARD_KEY, '1')
+  } catch {
+    /* private mode 등 — 무시 */
+  }
+}
+
 // ── 실시간 시세(tickers) — 15초 폴링으로 "살아있는 시장" ─────────────────────
 const tickers = ref<Map<number, MarketTickerDto>>(new Map())
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -43,6 +55,11 @@ function isLive(id: number): boolean {
 }
 
 onMounted(async () => {
+  try {
+    showOnboarding.value = localStorage.getItem(ONBOARD_KEY) !== '1'
+  } catch {
+    /* localStorage 불가 환경 — 배너 생략 */
+  }
   try {
     await catalog.ensureLoaded()
   } catch (err) {
@@ -90,9 +107,23 @@ function open(id: number) {
 
 <template>
   <div>
-    <h1 class="wx-page-title">Market</h1>
+    <!-- 첫 방문 온보딩: 익스트랙션 루프를 한 눈에 -->
+    <div v-if="showOnboarding" class="onboarding">
+      <div class="ob-body">
+        <div class="ob-title mono">WASTELAND EXCHANGE · 어떻게 노나</div>
+        <ol class="ob-steps">
+          <li><b>출격</b>(Raid) — 존을 골라 나가 전리품을 루팅. 오래 머물수록 사망확률↑</li>
+          <li><b>탈출 vs 사망</b> — 살아 돌아오면 전리품 귀속, 죽으면 반입·획득 전부 소실</li>
+          <li><b>거래</b>(Market) — 전리품을 팔아 캡을 벌고, 필요한 장비를 산다</li>
+          <li><b>확장</b>(Gear) — 캡으로 창고를 넓혀 더 많이 챙긴다</li>
+        </ol>
+      </div>
+      <button class="ob-dismiss mono" @click="dismissOnboarding">알겠어요 ✕</button>
+    </div>
+
+    <h1 class="wx-page-title">Market · 마켓</h1>
     <p class="wx-page-sub">
-      {{ items.length }} salvage templates — pick a crate to open its order book
+      살아있는 거래소 — 카드에서 시세를 보고, 눌러서 호가창으로 ({{ items.length }}종)
     </p>
 
     <div class="filters">
@@ -172,6 +203,49 @@ function open(id: number) {
 </template>
 
 <style scoped>
+/* 첫 방문 온보딩 스트립 */
+.onboarding {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  justify-content: space-between;
+  background: linear-gradient(180deg, var(--wx-panel-2), var(--wx-panel) 60%);
+  border: 1px solid var(--wx-border);
+  border-left: 3px solid var(--wx-amber-bright);
+  border-radius: var(--wx-r);
+  padding: 14px 16px;
+  margin-bottom: var(--wx-s5);
+  box-shadow: var(--wx-shadow);
+}
+.ob-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: var(--wx-amber-bright);
+  margin-bottom: 8px;
+}
+.ob-steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.9;
+  color: var(--wx-text-dim);
+}
+.ob-dismiss {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--wx-text-dim);
+  background: transparent;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-r-sm);
+  cursor: pointer;
+}
+.ob-dismiss:hover {
+  color: var(--wx-fg);
+  border-color: var(--wx-fg);
+}
+
 .filters {
   display: flex;
   gap: 14px;
