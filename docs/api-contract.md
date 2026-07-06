@@ -60,7 +60,7 @@
 | GET | `/api/inventory` | - | `InventoryDto` (스택 + 유니크 인스턴스) |
 | GET | `/api/inventory/ledger?page=&size=` | - | `PagedResult<ItemLedgerEntryDto>` (아이템 이동 원장: RAID_*/ADMIN_GRANT) |
 | GET | `/api/stash` | - | `StashDto` (STASH 컨테이너, 하위호환) |
-| GET | `/api/stash/{container}` | - | `StashDto` (지정 컨테이너: `stash`\|`loadout`, 대소문자 무시) |
+| GET | `/api/stash/{container}` | - | `StashDto` (지정 컨테이너: `stash`\|`pockets`, 대소문자 무시. 중첩 `container`는 인스턴스 id가 필요해 거부(400) — 장비 `GET /api/equipment`로 조회) |
 | POST | `/api/stash/move` | `MoveStashItemRequest` | `StashDto` (이동 후 `ToContainer` 스냅샷) |
 | GET | `/api/equipment` | - | `EquipmentDto` (장착 슬롯 + 장착된 백팩/리그의 중첩 그리드) |
 | POST | `/api/equipment/equip` | `EquipRequest` | `EquipmentDto` (장착 후 스냅샷) |
@@ -200,10 +200,13 @@
     **① 장착된 백팩/리그의 중첩 그리드(슬롯 순) → ② LOADOUT → ③ STASH 오버플로**. 스택은 같은 물리
     컨테이너에 동일 템플릿 칸이 있으면 그 칸에 수량을 합산한다. 어느 곳에도 자리가 없으면 미배치로
     남고(소유는 유지) 다음 `GET /api/stash`에서 STASH로 정합화된다. 총량은 항상 보존.
-- **Die = 로드아웃만 소실**: 위험 아이템 전량 소각(스택 미복귀 / 유니크 tombstone: `owner=NULL`,
-  `origin='RAID_LOST'`). **STASH(안전)는 무관**. 손실은 `item_ledger`(`RAID_LOSS`)에 회계된다.
-- **아이템 원장(`item_ledger`, append-only)**: 레이드 이동을 프로버넌스로 기록한다 —
-  `RAID_BROUGHT`(반입, -), `RAID_EXTRACT`(회수, +), `RAID_LOOT`(획득 materialize, +), `RAID_LOSS`(소실, -).
+- **Die = at-risk(위험)만 소실**: 위험 아이템 전량 소각(스택 미복귀 / 유니크 tombstone: `owner=NULL`,
+  `origin='RAID_LOST'`). **STASH(안전)는 무관**. 소실 자체는 `item_ledger`에 별도 항목을 남기지 않는다
+  (반입분은 `RAID_BROUGHT`에서 이미 debit돼 재차감이 이중이고, 전리품은 사전 credit이 없어 유령 음수가 되므로 — 회계 대칭화).
+  손실 감사는 `raid_session`(status=DIED) + `raid_session_item` 스냅샷이 보유한다.
+- **아이템 원장(`item_ledger`, append-only)**: 세션이 소유량에 준 순변화를 프로버넌스로 기록한다 —
+  `RAID_BROUGHT`(반입, -), `RAID_EXTRACT`(회수, +), `RAID_LOOT`(획득 materialize, +). (`RAID_LOSS`는
+  enum에 남아 있으나 위 대칭화로 사망 정산에서 더 이상 기록하지 않는다.)
   `wallet_ledger`의 감사 패턴을 아이템에 적용한 것(잔고 컬럼 없는 이동 로그, `ref_id`=세션 id).
 - **읽기 엔드포인트(프론트 전적/원장 화면)**:
   - `GET /api/raid/history?page=&size=` → 해결된(EXTRACTED/DIED) 과거 세션을 최신순으로 페이지네이션.

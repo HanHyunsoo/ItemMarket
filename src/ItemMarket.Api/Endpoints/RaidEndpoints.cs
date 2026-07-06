@@ -15,7 +15,8 @@ public static class RaidEndpoints
     {
         var api = app.MapGroup("/api/raid").RequireAuthorization().WithTags("Raid");
 
-        // 현재 세션 스냅샷(ACTIVE 우선, 없으면 최근 세션). 이력 없으면 Data=null.
+        // 현재 진행 중(ACTIVE) 세션 스냅샷만 반환한다. ACTIVE가 없으면 Data=null
+        // (해결된 세션 이력은 GET /api/raid/history).
         api.MapGet("", (ClaimsPrincipal u, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IRaidSessionGrain>(CurrentPlayer(u)).Get()));
 

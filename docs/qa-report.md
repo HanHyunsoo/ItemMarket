@@ -279,8 +279,10 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       `HardeningTests.Order_exists_probe_reflects_persistence` 추가. (`OrderBookEngine.cs`, `MarketRepository.cs`)
 - [ ] **BUG3**(선택) 중첩 컨테이너 그리드 직접 읽기 HTTP 라우트 노출. (`IStashGrain.GetContainer`)
 - [ ] **L1**(향후) 다중셀 스택 footprint — grid>1×1 스택형을 추가할 때 `Ctx.Footprints` 참조로 전환.
-- [ ] **문서 정렬** — `MoveStashItemRequest.Quantity`(풀 의미), `AddLootRequest.Kind`(무시됨),
-      `GET /api/raid`(ACTIVE-only, 코드 유지·주석 수정) 계약 텍스트를 구현에 맞춤.
+- [x] **문서 정렬** — `AddLootRequest.Kind`(무시·stackable로 결정), `MoveStashItemRequest.Quantity`(풀
+      의미) DTO 주석과 `GET /api/raid`(ACTIVE-only) 엔드포인트 주석을 구현에 맞춤. api-contract.md도
+      정합화: `/api/stash/{container}` `loadout`→`pockets`(container 거부), 사망 시 `RAID_LOSS` 미기록
+      (M4 대칭화 반영). (`RaidDtos.cs`, `StashDtos.cs`, `RaidEndpoints.cs`, `api-contract.md`)
 - [ ] **L9(b)/FINDING A**(선택) 가격밴드 ON 교차-밴드 매칭 — 문서화된 트레이드오프. 필요 시 크로스밴드
       코디네이션 도입.
 

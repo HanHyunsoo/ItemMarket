@@ -55,8 +55,9 @@ public sealed record RaidHistoryEntryDto(
 
 /// <summary>
 /// 레이드 중 전리품 획득 시뮬레이션 요청(MVP — 실제 통합에서는 게임 서버가 호출).
-/// Kind=Stack이면 Quantity 필수(≥1). Kind=Instance이면 Quantity 무시(1자루),
-/// Durability/Attachments는 선택(미지정 시 템플릿 기본).
+/// 전리품 종류는 요청 <see cref="Kind"/>가 아니라 <b>템플릿의 stackable 플래그로 결정</b>한다
+/// (Kind는 사실상 무시 — 게임 서버가 {TemplateId, Quantity}만 보내도 유니크면 인스턴스를 materialize).
+/// 스택이면 Quantity(1..max_stack), 유니크면 Quantity 무시(1자루)·Durability/Attachments 선택(미지정 시 템플릿 기본).
 /// </summary>
 public sealed record AddLootRequest(
     StashEntryKind Kind,
