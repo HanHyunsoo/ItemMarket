@@ -251,7 +251,10 @@ Http__Port=5090 Orleans__SiloPort=11121 Orleans__GatewayPort=30021 \
 Orleans__ClusterId=item-market-load \
 ConnectionStrings__Postgres="Host=localhost;Port=5432;Database=item_market_load;Username=market;Password=market" \
 Auth__Secret="load-test-secret-0123456789-abcdefghijklmnop" \
+RateLimiting__Orders__PermitLimit=100000 \
   dotnet run --project src/ItemMarket.Api -c Release --no-build &
+# ↑ 레이트리밋 기본값(600/10s)은 정상 트레이딩용이라 극단 벤치를 throttle할 수 있어 크게 오버라이드한다.
+#   (concurrency=64 기준 per-player 실측 ~22 req/s라 기본값으로도 대개 안 걸리지만, 스파이크 여유 확보)
 
 # 3) 부하 (spread → hot)
 PG="Host=localhost;Port=5432;Database=item_market_load;Username=market;Password=market"

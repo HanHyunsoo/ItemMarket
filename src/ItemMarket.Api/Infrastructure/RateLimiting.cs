@@ -19,8 +19,10 @@ public static class RateLimiting
     public static WebApplicationBuilder AddMarketRateLimiting(this WebApplicationBuilder builder)
     {
         var cfg = builder.Configuration;
-        // 넉넉한 기본값: 플레이어당 창(window)마다 permit 회 허용. 데모/기존 테스트는 안 걸린다.
-        var permitLimit = cfg.GetValue("RateLimiting:Orders:PermitLimit", 1000);
+        // 플레이어당 창(window)마다 permit 회 허용. 기본값 600/10s(=60 req/s)는 정상 트레이딩 UI엔
+        // 충분히 관대하면서 무한 봇 스팸을 제약하고, 부하 벤치(per-player 실측 ~44 req/s)의 헤드룸도 남긴다.
+        // 프로덕션은 더 타이트하게, 부하 측정 땐 더 크게 — appsettings("RateLimiting:Orders")로 오버라이드한다.
+        var permitLimit = cfg.GetValue("RateLimiting:Orders:PermitLimit", 600);
         var windowSeconds = cfg.GetValue("RateLimiting:Orders:WindowSeconds", 10);
         var queueLimit = cfg.GetValue("RateLimiting:Orders:QueueLimit", 0);
 

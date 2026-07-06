@@ -269,7 +269,10 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 - [x] **L7** `fee_bps` `[0,10000]` 클램프 — `GetFeeBpsAsync`가 `Math.Clamp`. 설정 경로가 없어 읽는
       지점이 유일 방어(음수=돈 발행, 초과=체결액 초과 수수료 차단). 회귀 테스트
       `MarketFlowTests.Fee_bps_is_clamped_to_valid_range` 추가. (`MarketRepository.cs`)
-- [ ] **L8** 레이트리밋 임계 재설정(현재 1000/10s). (`RateLimiting.cs:23-24`, `appsettings.json:27`)
+- [x] **L8** 레이트리밋 임계 재설정 — 기본값 1000→600/10s(과관대한 100 req/s → 60 req/s). 정상 UI엔
+      충분·봇 스팸 제약·부하 벤치(per-player 실측 ~22 req/s@c64) 헤드룸 유지. 프로덕션은 더 타이트하게,
+      부하 측정은 크게 오버라이드하도록 문서화(perf-report 재현에 `RateLimiting__Orders__PermitLimit`
+      추가). 설정 주입은 `RateLimitTests`(3/60s)가 이미 증명. (`RateLimiting.cs`, `appsettings.json`)
 - [x] **L9(a)** 커밋-후-예외 이중환불 창 — 보상 전 `OrderExistsAsync`로 멱등 재조정. INSERT가 예외를
       던졌어도 실제 커밋됐으면(주문 살아있음) 보상 환불을 건너뛴다(취소 때 재환불 → 이중환불 방지).
       조회 실패 시엔 보상 시도(환불 누락 < 이중환불 위험). 회귀 테스트
