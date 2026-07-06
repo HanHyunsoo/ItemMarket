@@ -28,6 +28,10 @@ public static class StashEndpoints
         api.MapPost("/stash/move", (MoveStashItemRequest req, ClaimsPrincipal u, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IStashGrain>(CurrentPlayer(u)).MoveItem(req)));
 
+        // 캡으로 스태시 행 확장(+6행). 점증 가격을 잔액에서 차감(캡 싱크) — 단일 트랜잭션.
+        api.MapPost("/stash/upgrade", (ClaimsPrincipal u, MarketRepository repo) =>
+            Exec(() => repo.UpgradeStashRowsAsync(CurrentPlayer(u))));
+
         return app;
     }
 

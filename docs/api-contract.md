@@ -62,6 +62,7 @@
 | GET | `/api/stash` | - | `StashDto` (STASH 컨테이너, 하위호환) |
 | GET | `/api/stash/{container}` | - | `StashDto` (지정 컨테이너: `stash`\|`pockets`, 대소문자 무시. 중첩 `container`는 인스턴스 id가 필요해 거부(400) — 장비 `GET /api/equipment`로 조회) |
 | POST | `/api/stash/move` | `MoveStashItemRequest` | `StashDto` (이동 후 `ToContainer` 스냅샷) |
+| POST | `/api/stash/upgrade` | - | `StashUpgradeResultDto` (캡으로 스태시 +6행. 점증 가격 차감(캡 싱크). 부족 시 `InsufficientFunds`, 상한 500 초과 시 `ValidationError`) |
 | GET | `/api/equipment` | - | `EquipmentDto` (장착 슬롯 + 장착된 백팩/리그의 중첩 그리드) |
 | POST | `/api/equipment/equip` | `EquipRequest` | `EquipmentDto` (장착 후 스냅샷) |
 | POST | `/api/equipment/unequip` | `UnequipRequest` | `EquipmentDto` (해제 후 스냅샷) |

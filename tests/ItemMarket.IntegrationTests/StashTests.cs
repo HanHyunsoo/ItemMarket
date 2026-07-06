@@ -5,6 +5,7 @@ using ItemMarket.Contracts.Admin;
 using ItemMarket.Contracts.Common;
 using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Stash;
+using ItemMarket.Contracts.Wallet;
 using Npgsql;
 using Xunit;
 using static ItemMarket.IntegrationTests.MarketAppFixture;
@@ -430,5 +431,72 @@ public class StashTests(MarketAppFixture f)
         await db.ExecuteAsync(
             "DELETE FROM stash_placement WHERE player_id = @p AND container = 'POCKETS'",
             new { p = player });
+    }
+
+    // fun#5: 캡으로 스태시 행 확장(+6행). 잔액 차감·점증 가격·wallet_ledger(STASH_UPGRADE) 기록.
+    [Fact]
+    public async Task Stash_upgrade_spends_caps_grows_rows_with_rising_price()
+    {
+        var admin = await _f.AuthedAs(Charlie);
+        var p = await _f.AuthedAs(Bravo);
+
+        await using (var db = new NpgsqlConnection(_f.ConnString))
+        {
+            await db.OpenAsync();
+            await db.ExecuteAsync("UPDATE player SET stash_rows = 60 WHERE id = @p", new { p = Bravo });
+        }
+        (await admin.PostAsJsonAsync("/api/admin/wallet/adjust",
+            new AdminAdjustWalletRequest(Bravo, 100000, "upgrade test"), Json)).EnsureSuccessStatusCode();
+        var balBefore = (await Api<WalletDto>(await p.GetAsync("/api/wallet"))).Data!.Balance;
+
+        try
+        {
+            // 1회: 60행 → 66행, base 2000.
+            var u1 = await Api<StashUpgradeResultDto>(await p.PostAsync("/api/stash/upgrade", null));
+            Assert.True(u1.Success);
+            Assert.Equal(66, u1.Data!.StashRows);
+            Assert.Equal(2000, u1.Data.Cost);
+            Assert.Equal(balBefore - 2000, u1.Data.Balance);
+            Assert.Equal(66, (await Api<StashDto>(await p.GetAsync("/api/stash"))).Data!.GridH); // 그리드 반영
+
+            // 2회: 66행 → 72행, 점증 3000(base + 1×step).
+            var u2 = await Api<StashUpgradeResultDto>(await p.PostAsync("/api/stash/upgrade", null));
+            Assert.Equal(72, u2.Data!.StashRows);
+            Assert.Equal(3000, u2.Data.Cost);
+
+            await using var db = new NpgsqlConnection(_f.ConnString);
+            await db.OpenAsync();
+            var n = await db.ExecuteScalarAsync<long>(
+                "SELECT count(*) FROM wallet_ledger WHERE player_id = @p AND reason = 'STASH_UPGRADE'",
+                new { p = Bravo });
+            Assert.True(n >= 2);
+        }
+        finally
+        {
+            await using var db = new NpgsqlConnection(_f.ConnString);
+            await db.OpenAsync();
+            await db.ExecuteAsync("UPDATE player SET stash_rows = 60 WHERE id = @p", new { p = Bravo }); // 원복
+        }
+    }
+
+    // fun#5: 잔액 부족 시 InsufficientFunds로 거부되고 행·잔액이 변하지 않는다.
+    [Fact]
+    public async Task Stash_upgrade_rejects_when_insufficient_caps()
+    {
+        var p = await _f.AuthedAs(Echo); // 레이드 전용 플레이어 — stash GridH 검증과 무관
+        await using (var db = new NpgsqlConnection(_f.ConnString))
+        {
+            await db.OpenAsync();
+            await db.ExecuteAsync("UPDATE player SET stash_rows = 60 WHERE id = @p", new { p = Echo });
+            await db.ExecuteAsync("UPDATE wallet SET balance = 0 WHERE player_id = @p", new { p = Echo });
+        }
+
+        var res = await p.PostAsync("/api/stash/upgrade", null);
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        Assert.Equal(ErrorCode.InsufficientFunds, (await Api<StashUpgradeResultDto>(res)).Error!.Code);
+
+        // 행·잔액 불변(원자적 롤백).
+        var rows = (await Api<StashDto>(await p.GetAsync("/api/stash"))).Data!.GridH;
+        Assert.Equal(60, rows);
     }
 }

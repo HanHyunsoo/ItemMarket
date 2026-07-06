@@ -22,6 +22,9 @@ public enum GridContainer
     Container
 }
 
+/// <summary>스태시 행 확장 구매 결과: 새 행 수, 지불한 캡, 갱신된 잔액.</summary>
+public sealed record StashUpgradeResultDto(int StashRows, long Cost, long Balance);
+
 /// <summary>
 /// 스태시 그리드 위 배치 하나. (X,Y)=좌상단 칸, W×H=템플릿의 footprint.
 /// Stack이면 TemplateId+Quantity, Instance면 InstanceId(+TemplateId) 사용.

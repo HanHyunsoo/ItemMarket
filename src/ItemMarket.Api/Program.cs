@@ -38,7 +38,9 @@ builder.AddMarketRateLimiting();
 // (loot당 사망확률은 존 티어가 결정한다 — MarketRepository.ZoneConfig)
 builder.Services.AddSingleton(new MarketRepository(
     connString,
-    cfg.GetValue("Raid:DurationSeconds", 180)));
+    cfg.GetValue("Raid:DurationSeconds", 180),
+    cfg.GetValue("Stash:UpgradeBasePrice", 2000L),
+    cfg.GetValue("Stash:UpgradeStep", 1000L)));
 
 // 매칭 엔진 옵션 — 가격 밴드 샤딩 스위치(Market:PriceBandSize, 기본 0=비활성).
 // 0이면 OrderBookGrain이 기존과 동일하게 템플릿당 단일 호가창을 직접 매칭한다.

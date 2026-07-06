@@ -17,8 +17,18 @@ namespace ItemMarket.Grains.Data;
 /// </summary>
 public sealed class MarketRepository(
     string connectionString,
-    int raidDurationSeconds = 180)
+    int raidDurationSeconds = 180,
+    long stashUpgradeBasePrice = 2000,
+    long stashUpgradeStep = 1000)
 {
+    /// <summary>스태시 확장 단위(행)와 상한(DDL CHECK와 일치).</summary>
+    private const int StashRowsPerUpgrade = 6;
+    private const int StashRowsMax = 500;
+    private const int StashRowsStart = 60;
+
+    /// <summary>다음 +6행 확장 가격(점증). 확장할수록 비싸져 무한 저가 확장을 막는 캡 싱크.</summary>
+    private long StashUpgradeCost(int currentRows)
+        => stashUpgradeBasePrice + Math.Max(0, (currentRows - StashRowsStart) / StashRowsPerUpgrade) * stashUpgradeStep;
     private NpgsqlConnection Open()
     {
         var c = new NpgsqlConnection(connectionString);
@@ -184,6 +194,49 @@ public sealed class MarketRepository(
         await InsertLedgerAsync(db, tx, playerId, delta, after, WalletLedgerReason.AdminAdjust, null);
         await tx.CommitAsync();
         return new WalletDto(playerId, after);
+    }
+
+    /// <summary>
+    /// 스태시 행 확장(+6행) 구매 — 단일 트랜잭션(캡 싱크). 현재 stash_rows로 점증 가격을 계산해
+    /// 잔액에서 차감(음수/부족 방어)하고 wallet_ledger에 STASH_UPGRADE로 회계한 뒤 stash_rows를 늘린다.
+    /// 상한(500) 초과는 ValidationError, 잔액 부족은 InsufficientFunds로 거부(원자적 롤백).
+    /// </summary>
+    public async Task<StashUpgradeResultDto> UpgradeStashRowsAsync(Guid playerId)
+    {
+        await using var db = Open();
+        await using var tx = await db.BeginTransactionAsync();
+        try
+        {
+            var rows = await db.ExecuteScalarAsync<int?>(
+                "SELECT stash_rows FROM player WHERE id = @playerId FOR UPDATE", new { playerId }, tx);
+            if (rows is null)
+                throw new DomainException(ErrorCode.PlayerNotFound, "플레이어를 찾을 수 없습니다.");
+            if (rows.Value + StashRowsPerUpgrade > StashRowsMax)
+                throw new DomainException(ErrorCode.ValidationError, $"창고가 이미 최대 크기({StashRowsMax}행)입니다.");
+
+            var cost = StashUpgradeCost(rows.Value);
+            var balance = await db.ExecuteScalarAsync<long>(
+                "SELECT balance FROM wallet WHERE player_id = @playerId FOR UPDATE", new { playerId }, tx);
+            if (balance < cost)
+                throw new DomainException(ErrorCode.InsufficientFunds, $"창고 확장에 {cost} 캡이 필요합니다(보유 {balance}).");
+
+            var after = balance - cost;
+            await db.ExecuteAsync("UPDATE wallet SET balance = @after WHERE player_id = @playerId",
+                new { after, playerId }, tx);
+            await InsertLedgerAsync(db, tx, playerId, -cost, after, WalletLedgerReason.StashUpgrade, null);
+
+            var newRows = rows.Value + StashRowsPerUpgrade;
+            await db.ExecuteAsync("UPDATE player SET stash_rows = @newRows WHERE id = @playerId",
+                new { newRows, playerId }, tx);
+
+            await tx.CommitAsync();
+            return new StashUpgradeResultDto(newRows, cost, after);
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
     }
 
     public async Task<PagedResult<WalletLedgerEntryDto>> GetLedgerAsync(Guid playerId, int page, int size)
