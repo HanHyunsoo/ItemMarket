@@ -48,6 +48,11 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
 
     public async Task<StashDto> GetStash(GridContainer container)
     {
+        // 중첩 컨테이너는 특정 인스턴스 id가 필수 → GetContainer를 써야 한다. InstanceId 없이 여기로
+        // 오면 그리드 크기 계산(NestedDims 조회)에서 NRE로 500이 났다 — 명확한 400으로 거부한다.
+        if (container == GridContainer.Container)
+            throw new DomainException(ErrorCode.ValidationError,
+                "중첩 컨테이너는 GetStash로 조회할 수 없습니다(인스턴스 id 필요). GetContainer를 사용하세요.");
         var ctx = await LoadAsync();
         await ReconcileAsync(ctx);
         var placements = await repo.GetStashPlacementsAsync(PlayerId);

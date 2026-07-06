@@ -248,8 +248,11 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       회귀 테스트 `HardeningTests.Idempotency_key_is_rejected_when_store_is_not_durable`)
 - [ ] **M3** OpenAPI enum — Swashbuckle 스키마 필터로 enum을 `type:string` + 값 목록으로 노출
       (`JsonStringEnumConverter` 반영). (`SwaggerSetup`)
-- [ ] **M1/BUG2** `GET /api/stash/container` → 400 — `ParseContainer`가 `Container`를 거절하거나 `GetStash`가
-      InstanceId 없는 `Container`를 검증. (`StashEndpoints.cs:35`, `StashGrain.cs:171-174`)
+- [x] **M1/BUG2** `GET /api/stash/container` → 500(NRE) 수정. 중첩 컨테이너는 인스턴스 id가 필수라 이
+      라우트로 조회 불가 — `ParseContainer`가 `Container`를 400으로 거부(안내 메시지) + `GetStash`
+      진입부 방어 가드로 이중화. 중첩 그리드는 `GET /api/equipment`의 `containers[]`로 노출됨.
+      회귀 테스트 `StashTests.Get_stash_by_container_rejects_nested_container_with_400` 추가.
+      (`StashEndpoints.cs`, `StashGrain.cs`)
 - [ ] **B(raid) StartedAt/ResolvedAt** — `LoadRaidDtoAsync`가 `started_at`/`resolved_at`을 DB에서 읽도록.
       (`MarketRepository.cs:1230,1331,1540-1550`)
 - [ ] **BUG D** loot 수량 상한 — `AddLootAsync`에서 `max_stack` 기준 검증/분할(현재 `1..1_000_000`만).

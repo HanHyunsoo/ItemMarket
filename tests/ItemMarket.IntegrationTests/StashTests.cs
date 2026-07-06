@@ -57,6 +57,30 @@ public class StashTests(MarketAppFixture f)
         Assert.Equal((first.X, first.Y), (second.X, second.Y)); // 재배치 없이 자리 보존
     }
 
+    // 컨테이너별 조회(BUG2/M1): stash/pockets는 정상, 중첩 컨테이너(container)는 인스턴스 id가
+    // 필수라 이 라우트로 조회 불가 — 500(NRE)이 아니라 명확한 400 ValidationError로 거부한다.
+    [Fact]
+    public async Task Get_stash_by_container_rejects_nested_container_with_400()
+    {
+        var alpha = await _f.AuthedAs(Alpha);
+
+        // 정상 컨테이너 조회는 200.
+        var stash = await alpha.GetAsync("/api/stash/stash");
+        Assert.Equal(HttpStatusCode.OK, stash.StatusCode);
+        var pockets = await alpha.GetAsync("/api/stash/pockets");
+        Assert.Equal(HttpStatusCode.OK, pockets.StatusCode);
+
+        // 중첩 컨테이너는 400(500 아님).
+        var nested = await alpha.GetAsync("/api/stash/container");
+        Assert.Equal(HttpStatusCode.BadRequest, nested.StatusCode);
+        Assert.Equal(ErrorCode.ValidationError, (await Api<StashDto>(nested)).Error!.Code);
+
+        // 알 수 없는 컨테이너도 400.
+        var unknown = await alpha.GetAsync("/api/stash/bogus");
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        Assert.Equal(ErrorCode.ValidationError, (await Api<StashDto>(unknown)).Error!.Code);
+    }
+
     // 유효 이동: 빈 칸으로 옮기면 그 좌표가 반영된다.
     [Fact]
     public async Task Valid_move_updates_position()

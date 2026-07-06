@@ -31,8 +31,12 @@ public static class StashEndpoints
         return app;
     }
 
+    // 이 라우트는 STASH/POCKETS만 조회한다. 중첩 컨테이너(CONTAINER)는 특정 인스턴스 id가
+    // 필수라 여기로 조회할 수 없다 — 파싱은 되지만 거부한다(장비 조회 GET /api/equipment의
+    // containers[]로 노출됨). 그대로 두면 GetStash(Container)가 InstanceId=null로 500(NRE)이 났다.
     private static GridContainer ParseContainer(string raw)
-        => Enum.TryParse<GridContainer>(raw, ignoreCase: true, out var c)
+        => Enum.TryParse<GridContainer>(raw, ignoreCase: true, out var c) && c != GridContainer.Container
             ? c
-            : throw new DomainException(ErrorCode.ValidationError, $"알 수 없는 컨테이너: {raw} (stash | pockets).");
+            : throw new DomainException(ErrorCode.ValidationError,
+                $"알 수 없는 컨테이너: {raw} (stash | pockets). 중첩 컨테이너는 장비(GET /api/equipment)로 조회합니다.");
 }
