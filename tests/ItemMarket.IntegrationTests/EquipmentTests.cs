@@ -76,10 +76,20 @@ public class EquipmentTests(MarketAppFixture f)
         => (await Inv(c)).Instances.Any(i => i.Id == instanceId);
 
     private static Task<HttpResponseMessage> Start(HttpClient c) => c.PostAsync("/api/raid/start", null);
+    private static Task<HttpResponseMessage> Start(HttpClient c, RaidZone zone)
+        => c.PostAsJsonAsync("/api/raid/start", new StartRaidRequest(zone), Json);
     private static Task<HttpResponseMessage> Extract(HttpClient c) => c.PostAsync("/api/raid/extract", null);
     private static Task<HttpResponseMessage> Die(HttpClient c) => c.PostAsync("/api/raid/die", null);
-    private static Task<HttpResponseMessage> Loot(HttpClient c, AddLootRequest req)
-        => c.PostAsJsonAsync("/api/raid/loot", req, Json);
+    private static Task<HttpResponseMessage> Scavenge(HttpClient c) => c.PostAsync("/api/raid/loot", null);
+
+    private async Task ResetDeathChance(Guid player)
+    {
+        await using var db = new NpgsqlConnection(_f.ConnString);
+        await db.OpenAsync();
+        await db.ExecuteAsync(
+            "UPDATE raid_session SET death_chance_bps = 0 WHERE player_id = @p AND status = 'ACTIVE'",
+            new { p = player });
+    }
 
     /// <summary>테스트 격리: 잔존 장착 슬롯을 모두 해제해 깨끗한 상태에서 시작한다(실행 순서 무관).</summary>
     private static async Task ClearEquipment(HttpClient c)
@@ -316,14 +326,16 @@ public class EquipmentTests(MarketAppFixture f)
         await Stash(h);
         await Equip(h, EquipSlot.Helmet, helmet);
 
-        (await Start(h)).EnsureSuccessStatusCode();
+        (await Start(h, RaidZone.High)).EnsureSuccessStatusCode(); // 유니크 비중 높은 존
 
-        // 유니크(카타나=63)를 Kind=Stack으로 잘못 보내도 인스턴스가 materialize되어야 한다.
-        var looted = await Api<RaidSessionDto>(await Loot(h, new AddLootRequest(StashEntryKind.Stack, 63)));
-        Assert.True(looted.Success);
-        var lootItem = Assert.Single(looted.Data!.Items, i => i.TemplateId == 63);
-        Assert.Equal(StashEntryKind.Instance, lootItem.Kind);
-        var instanceId = lootItem.InstanceId!.Value;
+        // 서버 드롭에서 유니크가 나올 때까지 루팅한다(유니크=stackable 아닌 카테고리, 전체의 ~절반).
+        Guid instanceId = Guid.Empty;
+        for (var i = 0; i < 40 && instanceId == Guid.Empty; i++)
+        {
+            var dropped = (await Api<LootResultDto>(await Scavenge(h))).Data!.Dropped!;
+            if (dropped.Kind == StashEntryKind.Instance) instanceId = dropped.InstanceId!.Value;
+        }
+        Assert.NotEqual(Guid.Empty, instanceId); // 유니크 드롭이 하나는 나온다
 
         // materialize 시점엔 위험(owner=NULL) + origin=RAID.
         await using (var db = new NpgsqlConnection(_f.ConnString))
@@ -335,6 +347,7 @@ public class EquipmentTests(MarketAppFixture f)
             Assert.False(await Owns(h, instanceId)); // 아직 소유 아님(위험).
         }
 
+        await ResetDeathChance(Hotel); // 다수 루팅으로 사망확률이 찼으므로 생존 보장(materialize 회귀가 목적)
         var extracted = await Api<RaidSessionDto>(await Extract(h));
         Assert.Equal(RaidStatus.Extracted, extracted.Data!.Status);
 

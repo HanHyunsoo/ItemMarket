@@ -23,12 +23,14 @@ public interface IRaidSessionGrain : IGrainWithGuidKey
     /// 레이드 시작: ACTIVE 세션이 없어야 한다(있으면 RaidActive). 스태시 밖 전부(장착 장비 +
     /// 장착된 백팩/리그 내용물 + 주머니)를 위험(at-risk)으로 잠그고(판매/이동 불가) 위험 스냅샷으로
     /// 옮긴다. 스태시 밖이 전부 비어 있으면 RaidNothingToDeploy(장비만 있어도 항상 성공한다).
-    /// 반환은 새 ACTIVE 세션.
+    /// 존(zone)이 드롭 등급 가중치·loot당 사망확률 상승률을 결정한다. 반환은 새 ACTIVE 세션.
     /// </summary>
-    Task<RaidSessionDto> StartRaid();
+    Task<RaidSessionDto> StartRaid(RaidZone zone);
 
-    /// <summary>전리품 획득(MVP 시뮬레이션): ACTIVE 세션에 LOOTED 위험 아이템 추가.</summary>
-    Task<RaidSessionDto> AddLoot(AddLootRequest req);
+    /// <summary>루팅(scavenge): 서버가 세션 존의 rarity 가중치로 무엇을·얼마나 드롭할지 결정해
+    /// ACTIVE 세션에 LOOTED 위험 아이템으로 추가하고 사망확률을 올린다. 이번 드롭과 갱신 세션을 반환.
+    /// 마감 초과 시 탈출 실패=사망으로 정산되어 Dropped=null, Session.Status=Died.</summary>
+    Task<LootResultDto> Scavenge();
 
     /// <summary>생존 탈출: ACTIVE→EXTRACTED. 반입+획득 전량을 소유로 복귀(→ 다음 GET에서 STASH 자동 배치).</summary>
     Task<RaidSessionDto> Extract();

@@ -21,9 +21,9 @@ public sealed class RaidSessionGrain(MarketRepository repo) : Grain, IRaidSessio
     public Task<PagedResult<RaidHistoryEntryDto>> GetHistory(int page, int size)
         => repo.GetRaidHistoryAsync(PlayerId, Math.Max(1, page), Math.Clamp(size, 1, 200));
 
-    public Task<RaidSessionDto> StartRaid() => repo.StartRaidAsync(PlayerId);
+    public Task<RaidSessionDto> StartRaid(RaidZone zone) => repo.StartRaidAsync(PlayerId, zone);
 
-    public Task<RaidSessionDto> AddLoot(AddLootRequest req) => repo.AddLootAsync(PlayerId, req);
+    public Task<LootResultDto> Scavenge() => repo.ScavengeAsync(PlayerId);
 
     public Task<RaidSessionDto> Extract() => repo.ExtractAsync(PlayerId);
 

@@ -69,10 +69,6 @@ public sealed class MarketAppFixture : IAsyncLifetime
             b.UseSetting("Orleans:ClusteringMode", "localhost");
             b.UseSetting("Orleans:SiloPort", "11199");
             b.UseSetting("Orleans:GatewayPort", "30199");
-            // 레이드 확률/타이머는 결정론적으로 검증한다: loot당 사망확률 증가를 0으로 두면
-            // loot+extract 테스트가 확률에 흔들리지 않는다(chance=0 → extract 항상 성공). 확률/만료
-            // 판정 자체는 death_chance_bps/deadline_at을 DB로 직접 조작하는 전용 테스트로 검증한다.
-            b.UseSetting("Raid:DeathChancePerLootBps", "0");
         });
 
         // 호스트 강제 기동(Orleans 실로 워밍업)

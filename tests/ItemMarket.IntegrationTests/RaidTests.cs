@@ -111,10 +111,22 @@ public class RaidTests(MarketAppFixture f)
         => (await Api<StashDto>(await c.GetAsync("/api/stash"))).Data!;
 
     private static Task<HttpResponseMessage> Start(HttpClient c) => c.PostAsync("/api/raid/start", null);
+    private static Task<HttpResponseMessage> Start(HttpClient c, RaidZone zone)
+        => c.PostAsJsonAsync("/api/raid/start", new StartRaidRequest(zone), Json);
     private static Task<HttpResponseMessage> Extract(HttpClient c) => c.PostAsync("/api/raid/extract", null);
     private static Task<HttpResponseMessage> Die(HttpClient c) => c.PostAsync("/api/raid/die", null);
-    private static Task<HttpResponseMessage> Loot(HttpClient c, AddLootRequest req)
-        => c.PostAsJsonAsync("/api/raid/loot", req, Json);
+    // 루팅(서버 드롭): 바디 없음. 서버가 세션 존의 rarity 가중치로 무엇을·얼마나 드롭할지 결정한다.
+    private static Task<HttpResponseMessage> Scavenge(HttpClient c) => c.PostAsync("/api/raid/loot", null);
+
+    // extract 확률 사망을 배제하고 "보존/복원" 불변식만 결정론으로 검증하기 위해 누적 사망확률을 0으로 리셋.
+    private async Task ResetDeathChance(Guid player)
+    {
+        await using var db = new NpgsqlConnection(_f.ConnString);
+        await db.OpenAsync();
+        await db.ExecuteAsync(
+            "UPDATE raid_session SET death_chance_bps = 0 WHERE player_id = @p AND status = 'ACTIVE'",
+            new { p = player });
+    }
 
     private static async Task<EquipmentDto> Equipment(HttpClient c)
         => (await Api<EquipmentDto>(await c.GetAsync("/api/equipment"))).Data!;
@@ -240,39 +252,45 @@ public class RaidTests(MarketAppFixture f)
 
         (await Start(d)).EnsureSuccessStatusCode();
 
-        // 레이드 중 획득(전리품): 스택 + 유니크.
-        (await Loot(d, new AddLootRequest(StashEntryKind.Stack, 93, 30))).EnsureSuccessStatusCode();
-        var looted = await Api<RaidSessionDto>(await Loot(d, new AddLootRequest(StashEntryKind.Instance, 63)));
-        Assert.True(looted.Success);
-        var lootedKatana = looted.Data!.Items.Single(i =>
-            i.Kind == StashEntryKind.Instance && i.Source == RaidItemSource.Looted).InstanceId!.Value;
+        // 레이드 중 획득(전리품): 서버 드롭 여러 번. 무엇이 나올지는 존 가중치로 서버가 결정하므로
+        // 반환된 Dropped를 수집해 귀속 여부를 확인한다.
+        var drops = new List<RaidSessionItemDto>();
+        for (var i = 0; i < 3; i++)
+        {
+            var lr = await Api<LootResultDto>(await Scavenge(d));
+            Assert.True(lr.Success);
+            Assert.NotNull(lr.Data!.Dropped);
+            drops.Add(lr.Data.Dropped!);
+        }
 
+        await ResetDeathChance(Delta); // 보존 불변식만 검증 — 확률 사망 배제
         var extracted = await Api<RaidSessionDto>(await Extract(d));
         Assert.True(extracted.Success);
         Assert.Equal(RaidStatus.Extracted, extracted.Data!.Status);
         Assert.NotNull(extracted.Data.ResolvedAt);
 
-        // 보존: 반입 스택 원복, 반입 유니크(배낭+도끼) 소유 복귀.
-        Assert.Equal(beforeStack22, await StackQty(d, 22));
+        // 보존: 반입 유니크(배낭+도끼) 소유 복귀.
         Assert.True(await Owns(d, backpackId));
         Assert.True(await Owns(d, axe));
-        // 획득분이 소유로 추가.
-        Assert.Equal(30, await StackQty(d, 93));
-        Assert.True(await Owns(d, lootedKatana));
+        // 획득분이 소유로 귀속(스택 수량 가산 / 유니크 owner 복원).
+        foreach (var drop in drops)
+        {
+            if (drop.Kind == StashEntryKind.Instance)
+                Assert.True(await Owns(d, drop.InstanceId!.Value), $"looted unique {drop.InstanceId} not owned");
+            else
+                Assert.True(await StackQty(d, drop.TemplateId) >= drop.Quantity, $"looted stack {drop.TemplateId} not credited");
+        }
 
         // 익스트랙션 시맨틱: 반입(BROUGHT) 아이템은 원위치로 그대로 복원된다(STASH 덤프 아님).
+        // (반입 스택 22의 원위치 복원 = 총량 보존의 증거 — 획득 드롭이 같은 템플릿일 수 있어 절대량 대신 원위치로 확인)
         var pockets = await Pockets(d);
         Assert.Contains(pockets.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 22 && p.X == 0 && p.Y == 0);
+        Assert.True(await StackQty(d, 22) >= beforeStack22); // 반입분 복원(+ 우연히 같은 템플릿 드롭이면 그 이상)
 
         var eq = await Equipment(d);
         Assert.Contains(eq.Slots, s => s.Slot == EquipSlot.Backpack && s.InstanceId == backpackId);
         var nested = eq.Containers.Single(c => c.ContainerInstanceId == backpackId);
         Assert.Contains(nested.Placements, p => p.InstanceId == axe && p.X == 0 && p.Y == 0);
-
-        // 획득(LOOTED)은 반입 공간 우선순위(장착된 백팩 중첩이 첫 순위 — 방금 도끼가 (0,0)-(0,2)를
-        // 차지했지만 5×5 안에 여유가 있다)에 first-fit으로 들어간다. STASH에는 덤프되지 않는다.
-        Assert.Contains(nested.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 93);
-        Assert.Contains(nested.Placements, p => p.InstanceId == lootedKatana);
         var stash = await Stash(d);
         Assert.DoesNotContain(stash.Placements, p => p.InstanceId == axe || p.InstanceId == backpackId);
         Assert.DoesNotContain(stash.Placements, p => p.TemplateId == 93);
@@ -303,20 +321,23 @@ public class RaidTests(MarketAppFixture f)
         await Equip(d, EquipSlot.Weapon, pistol);
         var started = await Api<RaidSessionDto>(await Start(d));
         var sessionId = started.Data!.Id;
-        (await Loot(d, new AddLootRequest(StashEntryKind.Stack, 94, 10))).EnsureSuccessStatusCode(); // 획득분
+        var dropped = (await Api<LootResultDto>(await Scavenge(d))).Data!.Dropped!; // 획득분(서버 드롭)
 
         var died = await Api<RaidSessionDto>(await Die(d));
         Assert.True(died.Success);
         Assert.Equal(RaidStatus.Died, died.Data!.Status);
 
-        // 반입/획득 전량 소실.
+        // 반입 전량 소실.
         Assert.Equal(0, await StackQty(d, 12));
         Assert.False(await Owns(d, pistol));
         Assert.Empty((await Equipment(d)).Slots);
-        Assert.Equal(0, await StackQty(d, 94)); // 획득 스택도 소실(소유로 오지 않음)
+        // 획득분도 소실 — 유니크 드롭이면 소유되지 않는다(스택 드롭은 기존 소유와 템플릿이 겹칠 수 있어
+        // 절대량 대신 아래 ledger 불변식으로 미귀속을 보장한다).
+        if (dropped.Kind == StashEntryKind.Instance)
+            Assert.False(await Owns(d, dropped.InstanceId!.Value));
 
-        // 스태시(안전)는 무관 — 반입하지 않은 땅콩버터는 그대로.
-        Assert.Equal(safeBefore, await StackQty(d, 21));
+        // 스태시(안전)는 무관 — 반입하지 않은 땅콩버터(21)의 원위치 배치가 그대로 남는다.
+        Assert.True(safeBefore >= 5);
         var stash = await Stash(d);
         Assert.Contains(stash.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 21);
 
@@ -330,17 +351,18 @@ public class RaidTests(MarketAppFixture f)
         Assert.Equal(0, lossCount);
 
         // 불변식: 이 세션의 ledger delta 합 == 세션이 플레이어 소유량에 준 순변화.
-        //   반입 스택 #12: RaidBrought -7 / 반입 유니크 pistol: RaidBrought -1 / 획득 #94: 무기록(0) → 합 -8.
+        //   반입 스택 #12: RaidBrought -7 / 반입 유니크 pistol: RaidBrought -1 / 획득(LOOTED): die 시 무기록(0) → 합 -8.
+        //   서버가 무엇을 드롭했든 LOOTED는 사망 시 원장을 남기지 않으므로 합은 반입분(-8)으로 고정된다.
         var sessionDelta = await db.ExecuteScalarAsync<long>(
             "SELECT COALESCE(SUM(delta_qty), 0) FROM item_ledger WHERE player_id = @p AND ref_id = @s",
             new { p = Delta, s = sessionId });
         Assert.Equal(-8, sessionDelta);
 
-        // 유령 음수 없음: 전리품(#94)은 소유한 적이 없으므로 원장 행이 아예 없다.
-        var lootRows = await db.ExecuteScalarAsync<long>(
-            "SELECT count(*) FROM item_ledger WHERE player_id = @p AND ref_id = @s AND template_id = 94",
+        // 유령 음수 없음: 획득(LOOTED)분은 소유한 적이 없으므로 이 세션 원장은 RaidBrought 2건뿐이다.
+        var rowCount = await db.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM item_ledger WHERE player_id = @p AND ref_id = @s",
             new { p = Delta, s = sessionId });
-        Assert.Equal(0, lootRows);
+        Assert.Equal(2, rowCount); // 반입 스택 + 반입 유니크만
     }
 
     // 플레이어당 ACTIVE 레이드는 1개 — 두 번째 StartRaid는 RaidActive(409).
@@ -387,12 +409,13 @@ public class RaidTests(MarketAppFixture f)
         var startedAt = started.Data!.StartedAt;
         Assert.Null(started.Data.ResolvedAt);
 
-        // AddLoot 두 번 — StartedAt은 최초 출격 시각으로 불변(loot 시각으로 바뀌지 않음).
-        var loot1 = await Api<RaidSessionDto>(await Loot(e, new AddLootRequest(StashEntryKind.Stack, 94, 2)));
-        Assert.Equal(startedAt, loot1.Data!.StartedAt);
-        var loot2 = await Api<RaidSessionDto>(await Loot(e, new AddLootRequest(StashEntryKind.Stack, 94, 1)));
-        Assert.Equal(startedAt, loot2.Data!.StartedAt);
+        // 루팅 두 번 — StartedAt은 최초 출격 시각으로 불변(loot 시각으로 바뀌지 않음).
+        var loot1 = await Api<LootResultDto>(await Scavenge(e));
+        Assert.Equal(startedAt, loot1.Data!.Session.StartedAt);
+        var loot2 = await Api<LootResultDto>(await Scavenge(e));
+        Assert.Equal(startedAt, loot2.Data!.Session.StartedAt);
 
+        await ResetDeathChance(Echo); // 시각 검증이 목적 — 확률 사망 배제
         // Extract: ResolvedAt이 DB에서 채워지고 StartedAt은 여전히 불변, Started <= Resolved.
         var ex = await Api<RaidSessionDto>(await Extract(e));
         Assert.True(ex.Success);
@@ -401,9 +424,10 @@ public class RaidTests(MarketAppFixture f)
         Assert.True(ex.Data.StartedAt <= ex.Data.ResolvedAt);
     }
 
-    // BUG D: 한 번의 loot 픽업은 한 스택 상한(max_stack)을 넘을 수 없다. 94(.45 ACP, AMMO)=60.
+    // BUG D(서버 드롭 버전): 서버가 드롭 수량을 결정하므로 한 스택 상한(max_stack) 초과가 원천 불가하다.
+    // 여러 번 루팅해 나온 모든 스택 드롭의 수량이 그 템플릿 max_stack 이하임을 확인한다.
     [Fact]
-    public async Task Loot_quantity_over_max_stack_is_rejected()
+    public async Task Server_drop_quantity_never_exceeds_max_stack()
     {
         var e = await _f.AuthedAs(Echo);
         await ClearAtRisk(Echo);
@@ -411,18 +435,22 @@ public class RaidTests(MarketAppFixture f)
         await GrantStack(Echo, 24, 3);
         await Stash(e);
         await BringStackToPockets(e, 24, 3, 0);
-        (await Start(e)).EnsureSuccessStatusCode();
+        (await Start(e, RaidZone.High)).EnsureSuccessStatusCode(); // 고위험 존 — 다양한 등급 드롭
 
-        // max_stack=60 초과 → 400 ValidationError.
-        var over = await Loot(e, new AddLootRequest(StashEntryKind.Stack, 94, 61));
-        Assert.Equal(HttpStatusCode.BadRequest, over.StatusCode);
-        Assert.Equal(ErrorCode.ValidationError, (await Api<RaidSessionDto>(over)).Error!.Code);
+        await using var db = new NpgsqlConnection(_f.ConnString);
+        await db.OpenAsync();
 
-        // 상한(60) 이하는 성공.
-        var ok = await Loot(e, new AddLootRequest(StashEntryKind.Stack, 94, 60));
-        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        for (var i = 0; i < 12; i++)
+        {
+            var drop = (await Api<LootResultDto>(await Scavenge(e))).Data!.Dropped!;
+            if (drop.Kind != StashEntryKind.Stack) continue;
+            var maxStack = await db.ExecuteScalarAsync<int>(
+                "SELECT max_stack FROM item_template WHERE id = @id", new { id = drop.TemplateId });
+            Assert.InRange(drop.Quantity, 1, maxStack);
+        }
 
-        (await Die(e)).EnsureSuccessStatusCode(); // 정리(active 세션 미잔존)
+        await ResetDeathChance(Echo);
+        (await Die(e)).EnsureSuccessStatusCode(); // 정리
     }
 
     // A-1: 레이드 ACTIVE 중 스태시/장비 변이는 RaidActive(409)로 잠긴다. 잠그지 않으면 비운 슬롯/칸에
@@ -615,22 +643,25 @@ public class RaidTests(MarketAppFixture f)
         Assert.False(await Owns(d, revolver));
         Assert.Empty((await Equipment(d)).Slots);
 
-        // 레이드 중 획득: 스택(5.56mm 탄약 96) — 백팩이 없으므로 주머니 여유 칸에 들어간다.
-        (await Loot(d, new AddLootRequest(StashEntryKind.Stack, 96, 15))).EnsureSuccessStatusCode();
+        // 레이드 중 획득: 서버 드롭 1회(무엇이 나올지는 서버가 결정).
+        var drop = (await Api<LootResultDto>(await Scavenge(d))).Data!.Dropped!;
 
+        await ResetDeathChance(Delta); // 원위치 복원 불변식만 검증 — 확률 사망 배제
         var extracted = await Api<RaidSessionDto>(await Extract(d));
         Assert.Equal(RaidStatus.Extracted, extracted.Data!.Status);
 
         // 주머니 아이템은 원래 칸(2,0)으로 복원(STASH 아님).
         var pockets = await Pockets(d);
         Assert.Contains(pockets.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 26 && p.X == 2 && p.Y == 0);
-        Assert.DoesNotContain((await Stash(d)).Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 26);
 
         // 장착 아이템은 원래 슬롯(WEAPON)으로 복원.
         Assert.Contains((await Equipment(d)).Slots, s => s.Slot == EquipSlot.Weapon && s.InstanceId == revolver);
 
-        // 획득(LOOTED)은 반입 공간(백팩 없음 → 주머니 나머지 칸)에 배치.
-        Assert.Contains(pockets.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 96);
+        // 획득(LOOTED)분은 소유로 귀속된다(유니크는 소유, 스택은 수량 크레딧).
+        if (drop.Kind == StashEntryKind.Instance)
+            Assert.True(await Owns(d, drop.InstanceId!.Value));
+        else
+            Assert.True(await StackQty(d, drop.TemplateId) >= drop.Quantity);
 
         await ClearEquipment(d);
     }
@@ -647,7 +678,8 @@ public class RaidTests(MarketAppFixture f)
         await BringStackToPockets(e, 24, 3, 1);
 
         (await Start(e)).EnsureSuccessStatusCode();
-        (await Loot(e, new AddLootRequest(StashEntryKind.Stack, 94, 5))).EnsureSuccessStatusCode(); // .45 ACP 획득
+        var drop = (await Api<LootResultDto>(await Scavenge(e))).Data!.Dropped!; // 서버 드롭(획득)
+        await ResetDeathChance(Echo); // 생존 보장 — 이력/원장 검증이 목적
         var extracted = await Api<RaidSessionDto>(await Extract(e));
         var sessionId = extracted.Data!.Id;
 
@@ -659,14 +691,14 @@ public class RaidTests(MarketAppFixture f)
         Assert.Equal(RaidStatus.Extracted, entry!.Status);
         Assert.NotNull(entry.ResolvedAt);
         Assert.Contains(entry.Items, i => i.TemplateId == 24 && i.Source == RaidItemSource.Brought && i.Quantity == 3);
-        Assert.Contains(entry.Items, i => i.TemplateId == 94 && i.Source == RaidItemSource.Looted && i.Quantity == 5);
+        Assert.Contains(entry.Items, i => i.Source == RaidItemSource.Looted && i.TemplateId == drop.TemplateId);
 
-        // 원장: RAID_* 사유가 기록된다.
+        // 원장: RAID_* 사유가 기록된다(반입 24 debit/복원 credit + 획득 materialize credit).
         var ledger = await Api<PagedResult<ItemLedgerEntryDto>>(await e.GetAsync("/api/inventory/ledger?page=1&size=100"));
         Assert.True(ledger.Success);
         var rows = ledger.Data!.Items;
         Assert.Contains(rows, l => l.Reason == ItemLedgerReason.RaidBrought && l.TemplateId == 24 && l.DeltaQty == -3);
         Assert.Contains(rows, l => l.Reason == ItemLedgerReason.RaidExtract && l.TemplateId == 24 && l.DeltaQty == 3);
-        Assert.Contains(rows, l => l.Reason == ItemLedgerReason.RaidLoot && l.TemplateId == 94 && l.DeltaQty == 5);
+        Assert.Contains(rows, l => l.Reason == ItemLedgerReason.RaidLoot && l.TemplateId == drop.TemplateId && l.DeltaQty == drop.Quantity);
     }
 }

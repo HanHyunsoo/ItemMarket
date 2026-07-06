@@ -23,6 +23,17 @@ public enum RaidItemSource
 }
 
 /// <summary>
+/// 출격 존(리스크/보상 티어). 존이 드롭 rarity 가중치와 loot당 사망확률 상승률을 함께 결정한다:
+/// 고위험 존일수록 좋은 등급이 잘 나오지만 사망확률이 빠르게 오른다(리스크/보상).
+/// </summary>
+public enum RaidZone
+{
+    Low,
+    Med,
+    High
+}
+
+/// <summary>
 /// 레이드 세션의 위험 아이템 한 줄(raid_session_item = 레이드 에스크로 스냅샷).
 /// 스택형은 TemplateId+Quantity, 유니크는 InstanceId(+TemplateId, Quantity=1).
 /// </summary>
@@ -55,15 +66,14 @@ public sealed record RaidHistoryEntryDto(
     DateTimeOffset? ResolvedAt,
     IReadOnlyList<RaidSessionItemDto> Items);
 
+/// <summary>출격 요청. 존(리스크/보상 티어)을 선택한다. 미지정 시 Med.</summary>
+public sealed record StartRaidRequest(RaidZone Zone = RaidZone.Med);
+
 /// <summary>
-/// 레이드 중 전리품 획득 시뮬레이션 요청(MVP — 실제 통합에서는 게임 서버가 호출).
-/// 전리품 종류는 요청 <see cref="Kind"/>가 아니라 <b>템플릿의 stackable 플래그로 결정</b>한다
-/// (Kind는 사실상 무시 — 게임 서버가 {TemplateId, Quantity}만 보내도 유니크면 인스턴스를 materialize).
-/// 스택이면 Quantity(1..max_stack), 유니크면 Quantity 무시(1자루)·Durability/Attachments 선택(미지정 시 템플릿 기본).
+/// 루팅(scavenge) 결과. 서버가 세션 존의 rarity 가중치로 무엇을·얼마나 드롭할지 결정하므로,
+/// 클라이언트는 이번에 획득한 것(<see cref="Dropped"/>)과 갱신된 세션(<see cref="Session"/>)을 함께 받는다.
+/// 마감(deadline)을 넘겨 루팅하면 탈출 실패=사망 정산되어 Dropped=null, Session.Status=Died가 된다.
 /// </summary>
-public sealed record AddLootRequest(
-    StashEntryKind Kind,
-    int TemplateId,
-    int? Quantity = null,
-    int? Durability = null,
-    IReadOnlyList<string>? Attachments = null);
+public sealed record LootResultDto(
+    RaidSessionItemDto? Dropped,
+    RaidSessionDto Session);

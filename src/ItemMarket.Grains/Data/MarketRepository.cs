@@ -17,8 +17,7 @@ namespace ItemMarket.Grains.Data;
 /// </summary>
 public sealed class MarketRepository(
     string connectionString,
-    int raidDurationSeconds = 180,
-    int deathChancePerLootBps = 1200)
+    int raidDurationSeconds = 180)
 {
     private NpgsqlConnection Open()
     {
@@ -33,6 +32,37 @@ public sealed class MarketRepository(
     /// </summary>
     public static long CalcFee(long execPrice, int quantity, int feeBps)
         => (long)((Int128)execPrice * quantity * feeBps / 10000);
+
+    // ── 드롭테이블(존 티어) ────────────────────────────────────────────────
+    // rarity 순서 고정. 존별 가중치[COMMON,UNCOMMON,RARE,EPIC,LEGENDARY] + loot당 사망확률 상승률.
+    // 고위험 존일수록 좋은 등급이 잘 나오지만 사망확률이 빠르게 오른다(리스크/보상, #1 연동).
+    private static readonly string[] Rarities = ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"];
+    private static readonly Dictionary<RaidZone, (int[] Weights, int DeathIncBps)> ZoneConfig = new()
+    {
+        [RaidZone.Low] = ([55, 30, 12, 3, 0], 800),
+        [RaidZone.Med] = ([35, 32, 22, 9, 2], 1200),
+        [RaidZone.High] = ([15, 30, 35, 15, 5], 2000),
+    };
+
+    /// <summary>존 가중치로 rarity 하나를 뽑는다(Random.Shared). weight=0인 등급은 뽑히지 않는다.</summary>
+    private static string RollRarity(int[] weights)
+    {
+        int total = weights.Sum();
+        int r = Random.Shared.Next(total);
+        for (int i = 0; i < weights.Length; i++)
+        {
+            if (r < weights[i]) return Rarities[i];
+            r -= weights[i];
+        }
+        return Rarities[0];
+    }
+
+    private static RaidZone ParseZone(string z) => z switch
+    {
+        "Low" => RaidZone.Low,
+        "High" => RaidZone.High,
+        _ => RaidZone.Med
+    };
 
     // ======================================================================
     //  설정 / 플레이어 / 카탈로그
@@ -1082,7 +1112,7 @@ public sealed class MarketRepository(
     /// 스태시 밖이 전부 비어 있으면(장비도 없고 주머니도 비고 컨테이너도 없으면) RaidNothingToDeploy로
     /// 거부한다 — 반대로 장착 장비만 있어도(주머니가 비어도) 출격은 항상 성공해야 한다.
     /// </summary>
-    public async Task<RaidSessionDto> StartRaidAsync(Guid playerId)
+    public async Task<RaidSessionDto> StartRaidAsync(Guid playerId, RaidZone zone)
     {
         await using var db = Open();
         await using var tx = await db.BeginTransactionAsync();
@@ -1140,11 +1170,12 @@ public sealed class MarketRepository(
 
             // 3) 세션 생성. 출격 마감(deadline)을 now() + 제한시간으로 설정 — 초과 후 extract/loot 시
             //    탈출 실패=사망으로 정산한다(lazy expiry). death_chance_bps는 0에서 시작해 loot마다 상승.
+            //    zone은 드롭 등급 가중치·loot당 사망확률 상승률을 결정한다.
             var sessionId = Guid.NewGuid();
             await db.ExecuteAsync(
-                @"INSERT INTO raid_session(id, player_id, status, deadline_at)
-                  VALUES (@sessionId, @playerId, 'ACTIVE', now() + make_interval(secs => @dur))",
-                new { sessionId, playerId, dur = raidDurationSeconds }, tx);
+                @"INSERT INTO raid_session(id, player_id, status, deadline_at, zone)
+                  VALUES (@sessionId, @playerId, 'ACTIVE', now() + make_interval(secs => @dur), @zone)",
+                new { sessionId, playerId, dur = raidDurationSeconds, zone = zone.ToString() }, tx);
 
             // 4) 스택 반입: inventory_stack 차감(= 매도 에스크로 이동) + 스냅샷 + 원장 + 해당 배치 제거.
             foreach (var s in stackItems)
@@ -1232,75 +1263,75 @@ public sealed class MarketRepository(
     }
 
     /// <summary>
-    /// AddLoot(한 트랜잭션, MVP 전리품 시뮬레이션): ACTIVE 세션에 LOOTED 위험 아이템 추가.
-    /// 스택은 스냅샷만(소유 인벤은 Extract 시 가산), 유니크는 item_instance를 owner=NULL·origin=RAID로
-    /// 즉시 생성(에스크로 상태)하고 Extract 시 소유가 부여된다.
+    /// Scavenge(한 트랜잭션, 서버 드롭테이블): 세션 존(zone)의 rarity 가중치로 무엇을·얼마나 드롭할지
+    /// 서버가 결정해 ACTIVE 세션에 LOOTED 위험 아이템으로 추가한다(클라이언트는 아이템·수량을 못 정함 →
+    /// 무한 인플레 차단). 스택은 스냅샷만(소유 인벤은 Extract 시 가산), 유니크는 item_instance를
+    /// owner=NULL·origin=RAID로 즉시 생성한다. loot마다 존별 사망확률을 올린다("한 상자 더"의 대가).
+    /// 마감(deadline)을 넘겼으면 탈출 실패=사망으로 정산하고 Dropped=null을 반환한다(lazy expiry).
     /// </summary>
-    public async Task<RaidSessionDto> AddLootAsync(Guid playerId, AddLootRequest req)
+    public async Task<LootResultDto> ScavengeAsync(Guid playerId)
     {
-        // 마감(deadline)을 넘긴 세션에 loot를 시도하면 탈출 실패=사망으로 정산한다(lazy expiry).
         var timing = await GetActiveRaidTimingAsync(playerId);
         if (timing is { Expired: true })
-            return await ResolveRaidAsync(playerId, extracted: false);
+            return new LootResultDto(null, await ResolveRaidAsync(playerId, extracted: false));
 
         await using var db = Open();
-
-        var tpl = await db.QuerySingleOrDefaultAsync(
-            "SELECT stackable, max_durability, max_stack FROM item_template WHERE id = @id", new { id = req.TemplateId });
-        if (tpl is null)
-            throw new DomainException(ErrorCode.TemplateNotFound, "아이템 템플릿을 찾을 수 없습니다.");
-        bool stackable = (bool)tpl.stackable;
-        int maxStack = (int)tpl.max_stack;
-
         await using var tx = await db.BeginTransactionAsync();
         try
         {
-            var sessionId = await db.ExecuteScalarAsync<Guid?>(
-                "SELECT id FROM raid_session WHERE player_id = @playerId AND status = 'ACTIVE' FOR UPDATE",
+            var sess = await db.QuerySingleOrDefaultAsync(
+                "SELECT id, zone FROM raid_session WHERE player_id = @playerId AND status = 'ACTIVE' FOR UPDATE",
                 new { playerId }, tx);
-            if (sessionId is null)
+            if (sess is null)
                 throw new DomainException(ErrorCode.RaidNotFound, "진행 중인 레이드가 없습니다.");
+            Guid sessionId = (Guid)sess.id;
+            var (weights, deathInc) = ZoneConfig[ParseZone((string)sess.zone)];
 
-            // 전리품 종류는 템플릿의 stackable 플래그로 결정한다(요청 Kind가 아님) —
-            // 게임 서버가 {templateId, quantity}만 보내도 유니크면 인스턴스를 materialize한다(버그 수정).
+            // 존 가중치로 rarity 롤 → 그 rarity의 템플릿 중 랜덤 1종(무한생성 대신 서버 권위 드롭).
+            var rarity = RollRarity(weights);
+            var tpl = await db.QuerySingleAsync(
+                @"SELECT id, stackable, max_durability, max_stack FROM item_template
+                  WHERE rarity = @rarity ORDER BY random() LIMIT 1",
+                new { rarity }, tx);
+            int templateId = (int)tpl.id;
+            bool stackable = (bool)tpl.stackable;
+            int maxStack = (int)tpl.max_stack;
+
+            RaidSessionItemDto dropped;
             if (stackable)
             {
-                var qty = req.Quantity ?? 1;
-                // 한 번의 전리품 픽업은 한 스택 상한(max_stack)을 넘을 수 없다. Extract 시점의 인벤 분할
-                // 배치는 별개로 유지되지만, loot 자체는 도메인상 단일 픽업이라 상한 초과를 거부한다(무한 픽업 차단).
-                if (qty < 1 || qty > maxStack)
-                    throw new DomainException(ErrorCode.ValidationError, $"전리품 수량은 1 이상 {maxStack} 이하이어야 합니다.");
+                // 수량 = 1..max_stack(한 스택 상한 이내 — 서버가 보장하므로 상한 초과가 원천 불가).
+                int qty = 1 + Random.Shared.Next(maxStack);
                 await db.ExecuteAsync(
                     @"INSERT INTO raid_session_item(session_id, kind, template_id, instance_id, quantity, source)
                       VALUES (@sessionId, 'STACK', @templateId, NULL, @qty, 'LOOTED')",
-                    new { sessionId, templateId = req.TemplateId, qty }, tx);
+                    new { sessionId, templateId, qty }, tx);
+                dropped = new RaidSessionItemDto(StashEntryKind.Stack, templateId, null, qty, RaidItemSource.Looted);
             }
             else
             {
-                if (req.Durability is < 0)
-                    throw new DomainException(ErrorCode.ValidationError, "내구도는 음수일 수 없습니다.");
                 var instanceId = Guid.NewGuid();
-                var durability = req.Durability ?? (int?)tpl.max_durability;
-                var attJson = System.Text.Json.JsonSerializer.Serialize(req.Attachments ?? []);
+                var durability = (int?)tpl.max_durability;
                 // 위험 상태의 유니크(owner=NULL) 즉시 생성 — origin=RAID로 프로버넌스 표시.
                 await db.ExecuteAsync(
                     @"INSERT INTO item_instance(id, template_id, owner_player_id, durability, attachments, origin)
-                      VALUES (@instanceId, @templateId, NULL, @durability, @attJson::jsonb, 'RAID')",
-                    new { instanceId, templateId = req.TemplateId, durability, attJson }, tx);
+                      VALUES (@instanceId, @templateId, NULL, @durability, '[]'::jsonb, 'RAID')",
+                    new { instanceId, templateId, durability }, tx);
                 await db.ExecuteAsync(
                     @"INSERT INTO raid_session_item(session_id, kind, template_id, instance_id, quantity, source)
                       VALUES (@sessionId, 'INSTANCE', @templateId, @instanceId, 1, 'LOOTED')",
-                    new { sessionId, templateId = req.TemplateId, instanceId }, tx);
+                    new { sessionId, templateId, instanceId }, tx);
+                dropped = new RaidSessionItemDto(StashEntryKind.Instance, templateId, instanceId, 1, RaidItemSource.Looted);
             }
 
-            // loot 성공 — 누적 사망확률을 올린다("한 상자 더"의 대가. extract에서 이 확률로 사망 롤).
+            // loot 성공 — 존별 사망확률 상승(extract에서 이 확률로 사망 롤).
             await db.ExecuteAsync(
                 "UPDATE raid_session SET death_chance_bps = death_chance_bps + @inc WHERE id = @sessionId",
-                new { inc = deathChancePerLootBps, sessionId = sessionId.Value }, tx);
+                new { inc = deathInc, sessionId }, tx);
 
-            var dto = await LoadRaidDtoAsync(db, tx, sessionId.Value, playerId, RaidStatus.Active);
+            var session = await LoadRaidDtoAsync(db, tx, sessionId, playerId, RaidStatus.Active);
             await tx.CommitAsync();
-            return dto;
+            return new LootResultDto(dropped, session);
         }
         catch
         {
