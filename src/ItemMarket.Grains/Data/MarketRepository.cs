@@ -663,6 +663,15 @@ public sealed class MarketRepository(string connectionString)
             });
     }
 
+    /// <summary>주문이 영속화됐는지(커밋됐는지) 확인. 에스크로 보상 전에 "정말 INSERT가 안 됐는지"를
+    /// 재조정해 커밋-후-예외 창에서의 이중환불을 막는 데 쓴다(L9a).</summary>
+    public async Task<bool> OrderExistsAsync(Guid id)
+    {
+        await using var db = Open();
+        return await db.ExecuteScalarAsync<bool>(
+            "SELECT EXISTS(SELECT 1 FROM market_order WHERE id = @id)", new { id });
+    }
+
     public async Task<OrderRow?> GetOrderAsync(Guid id)
     {
         await using var db = Open();

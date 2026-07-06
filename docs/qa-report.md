@@ -268,8 +268,10 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       지점이 유일 방어(음수=돈 발행, 초과=체결액 초과 수수료 차단). 회귀 테스트
       `MarketFlowTests.Fee_bps_is_clamped_to_valid_range` 추가. (`MarketRepository.cs`)
 - [ ] **L8** 레이트리밋 임계 재설정(현재 1000/10s). (`RateLimiting.cs:23-24`, `appsettings.json:27`)
-- [ ] **L9(a)** 에스크로+주문 INSERT 동일 트랜잭션 or 멱등 재조정(커밋-후-예외 이중환불 창).
-      (`OrderBookEngine.cs:150-177`)
+- [x] **L9(a)** 커밋-후-예외 이중환불 창 — 보상 전 `OrderExistsAsync`로 멱등 재조정. INSERT가 예외를
+      던졌어도 실제 커밋됐으면(주문 살아있음) 보상 환불을 건너뛴다(취소 때 재환불 → 이중환불 방지).
+      조회 실패 시엔 보상 시도(환불 누락 < 이중환불 위험). 회귀 테스트
+      `HardeningTests.Order_exists_probe_reflects_persistence` 추가. (`OrderBookEngine.cs`, `MarketRepository.cs`)
 - [ ] **BUG3**(선택) 중첩 컨테이너 그리드 직접 읽기 HTTP 라우트 노출. (`IStashGrain.GetContainer`)
 - [ ] **L1**(향후) 다중셀 스택 footprint — grid>1×1 스택형을 추가할 때 `Ctx.Footprints` 참조로 전환.
 - [ ] **문서 정렬** — `MoveStashItemRequest.Quantity`(풀 의미), `AddLootRequest.Kind`(무시됨),

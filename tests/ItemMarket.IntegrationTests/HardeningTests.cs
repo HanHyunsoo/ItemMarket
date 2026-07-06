@@ -7,6 +7,8 @@ using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Orders;
 using ItemMarket.Contracts.Trades;
 using ItemMarket.Contracts.Wallet;
+using ItemMarket.Grains.Data;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using static ItemMarket.IntegrationTests.MarketAppFixture;
 
@@ -59,6 +61,22 @@ public class HardeningTests(MarketAppFixture f)
         // 헤더 없음 → 평소대로 등록(멱등 경로를 타지 않음).
         var noKey = await PostOrder(buyer, new PlaceOrderRequest(OrderSide.Buy, 8, 10, 1));
         Assert.True((await Api<PlaceOrderResult>(noKey)).Success);
+    }
+
+    // L9a: OrderExistsAsync는 커밋-후-예외 창에서 보상 전 멱등 재조정에 쓰인다 —
+    // 영속된 주문은 true, 존재하지 않는 id는 false. (이중환불 방지 가드의 판별 근거)
+    [Fact]
+    public async Task Order_exists_probe_reflects_persistence()
+    {
+        var repo = _f.Services.GetRequiredService<MarketRepository>();
+        var buyer = await _f.AuthedAs(Alpha);
+
+        // 매도자 없는 템플릿 → 매수 잔존(주문 영속).
+        var placed = await Api<PlaceOrderResult>(await PostOrder(buyer, new PlaceOrderRequest(OrderSide.Buy, 9, 30, 1)));
+        Assert.True(placed.Success);
+
+        Assert.True(await repo.OrderExistsAsync(placed.Data!.Order.Id));
+        Assert.False(await repo.OrderExistsAsync(Guid.NewGuid()));
     }
 
     // ==================================================================== A1

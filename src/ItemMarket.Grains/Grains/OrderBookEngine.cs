@@ -156,6 +156,25 @@ internal sealed class OrderBookEngine(
         }
         catch (Exception insertEx)
         {
+            // 커밋-후-예외 창(L9a): INSERT가 실제로 커밋됐는데 응답만 예외로 돌아왔을 수 있다. 그 경우
+            // 주문이 살아있으므로 보상 환불하면 나중에 주문 취소 때 또 환불돼 이중환불이 된다. 실제 주문
+            // 존재를 재조회해 없을 때만 보상한다(멱등 재조정). 조회 자체가 실패하면 보상을 시도한다
+            // (환불 누락보다 이중환불 위험이 작고, ORDER_ESCROW 원장으로 사후 추적 가능).
+            bool persisted;
+            try { persisted = await repo.OrderExistsAsync(orderId); }
+            catch (Exception probeEx)
+            {
+                persisted = false;
+                log.LogError(probeEx, "주문 {OrderId} 존재 재조회 실패 — 보상을 시도한다", orderId);
+            }
+
+            if (persisted)
+            {
+                log.LogWarning(insertEx,
+                    "주문 {OrderId} INSERT가 예외를 던졌으나 실제로는 커밋됨 — 에스크로 보상을 건너뛴다(이중환불 방지)", orderId);
+                throw;
+            }
+
             try
             {
                 if (req.Side == OrderSide.Buy)
