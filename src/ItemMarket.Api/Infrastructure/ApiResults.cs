@@ -38,6 +38,7 @@ public static class ApiResults
             or ErrorCode.OrderNotFound or ErrorCode.RaidNotFound => StatusCodes.Status404NotFound,
         ErrorCode.RateLimited => StatusCodes.Status429TooManyRequests,
         ErrorCode.IdempotencyInProgress or ErrorCode.RaidActive => StatusCodes.Status409Conflict,
+        ErrorCode.IdempotencyUnavailable => StatusCodes.Status503ServiceUnavailable,
         _ => StatusCodes.Status400BadRequest
     };
 
@@ -72,6 +73,16 @@ public static class ApiResults
     public static async Task<IResult> ExecIdempotent<T>(
         IIdempotencyStore store, ClaimsPrincipal user, string key, Func<Task<T>> action)
     {
+        // 내구 저장소(Redis)가 없으면 멱등성을 보장할 수 없다. 조용히 무시(중복 방어 없이 통과)하는 대신
+        // 명시적으로 거부한다(M2) — 클라이언트가 요청한 보장을 서버가 못 지키면 성공한 척하지 않는다.
+        if (!store.IsDurable)
+        {
+            Logger?.LogWarning("Idempotency-Key 요청을 받았으나 내구 저장소(Redis)가 구성되지 않아 멱등성을 보장할 수 없습니다 → 거부(503).");
+            return Results.Json(
+                ApiResponse<T>.Fail(ErrorCode.IdempotencyUnavailable, "멱등성 저장소(Redis)가 구성되지 않아 Idempotency-Key를 처리할 수 없습니다."),
+                statusCode: StatusFor(ErrorCode.IdempotencyUnavailable));
+        }
+
         Guid pid;
         try { pid = CurrentPlayer(user); }
         catch (DomainException ex) { return Results.Json(ApiResponse<T>.Fail(ex.Code, ex.Message), statusCode: StatusFor(ex.Code)); }

@@ -242,8 +242,10 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       `RaidLoss`(−)만 남으면 유령 음수였다. 물리 tombstone(유니크 `owner=NULL,origin=RAID_LOST`)은
       유지, 손실 감사는 `raid_session`(DIED)+`raid_session_item`이 보유. 불변식(세션 `ref_id` ledger
       합 == 소유량 순변화) 회귀 테스트 추가. (`MarketRepository.cs:1302~`, `RaidTests.cs`)
-- [ ] **M2** 멱등성 — 프로덕션에서 Redis 필수화. 무저장 폴백(`NullIdempotencyStore`)일 땐 `Idempotency-Key`를
-      거부하거나 경고 로그. (`Program.cs:76-79`, `IdempotencyStore.cs:84-92`)
+- [x] **M2** 멱등성 — 프로덕션에서 Redis 미구성 시 부팅 fail-fast. 무저장 폴백(`NullIdempotencyStore`,
+      `IsDurable=false`)에서 `Idempotency-Key`가 오면 조용히 무시하지 않고 `503 IdempotencyUnavailable`로
+      거부 + 경고 로그. 헤더 없는 일반 주문은 무영향. (`Program.cs`, `IdempotencyStore.cs`, `ApiResults.cs`,
+      회귀 테스트 `HardeningTests.Idempotency_key_is_rejected_when_store_is_not_durable`)
 - [ ] **M3** OpenAPI enum — Swashbuckle 스키마 필터로 enum을 `type:string` + 값 목록으로 노출
       (`JsonStringEnumConverter` 반영). (`SwaggerSetup`)
 - [ ] **M1/BUG2** `GET /api/stash/container` → 400 — `ParseContainer`가 `Container`를 거절하거나 `GetStash`가

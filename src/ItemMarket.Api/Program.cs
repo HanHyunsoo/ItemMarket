@@ -71,8 +71,15 @@ if (!string.IsNullOrWhiteSpace(redisConn))
     builder.Services.AddSingleton<IConnectionMultiplexer>(ConnectionMultiplexer.Connect(redisConn));
 }
 
+// 프로덕션에서는 멱등성/실시간 백플레인을 위해 Redis가 필수다. 미구성 시 멱등성이 조용히 no-op
+// 되는 최악(재시도가 중복 주문으로)을 원천 차단하기 위해 부팅을 fail-fast로 중단한다(M2).
+if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(redisConn))
+    throw new InvalidOperationException(
+        "프로덕션에서는 멱등성/실시간 백플레인을 위해 Redis:ConnectionString이 필수입니다. " +
+        "구성하거나 비프로덕션 환경으로 실행하세요.");
+
 // 멱등성 저장소: Redis 구성 시 RedisIdempotencyStore(TTL=Idempotency:TtlMinutes, 기본 60),
-// 아니면 무저장 Null(헤더 무시 → 단일 인스턴스 개발에서 주문이 평소대로 등록됨).
+// 아니면 무저장 Null(IsDurable=false → 헤더가 오면 ExecIdempotent가 503으로 거부).
 if (string.IsNullOrWhiteSpace(redisConn))
 {
     builder.Services.AddSingleton<IIdempotencyStore, NullIdempotencyStore>();

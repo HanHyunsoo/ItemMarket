@@ -24,6 +24,12 @@ public readonly record struct IdempotencyClaim(IdempotencyStatus Status, string?
 /// </summary>
 public interface IIdempotencyStore
 {
+    /// <summary>
+    /// 이 저장소가 멱등성을 실제로 보장하는가(내구 슬롯 유지). Redis=true, 무저장 폴백=false.
+    /// false면 Idempotency-Key를 조용히 무시하지 않고 명시적으로 거부한다(M2).
+    /// </summary>
+    bool IsDurable { get; }
+
     /// <summary>(player, key) 슬롯을 원자적으로 청구한다.</summary>
     Task<IdempotencyClaim> TryClaimAsync(Guid playerId, string key);
 
@@ -46,6 +52,8 @@ public sealed class RedisIdempotencyStore(IConnectionMultiplexer redis, TimeSpan
 {
     /// <summary>처리중 슬롯을 표시하는 센티넬. 응답 JSON은 항상 여는 중괄호로 시작하므로 충돌하지 않는다.</summary>
     public const string InflightMarker = "INFLIGHT";
+
+    public bool IsDurable => true;
 
     /// <summary>Redis 키 규칙. 테스트에서 슬롯을 직접 조작할 때 재사용한다.</summary>
     public static string RedisKeyFor(Guid playerId, string key) => $"idem:{playerId}:{key}";
@@ -78,11 +86,14 @@ public sealed class RedisIdempotencyStore(IConnectionMultiplexer redis, TimeSpan
 }
 
 /// <summary>
-/// Redis 미구성(단일 인스턴스 개발) 시의 무저장 구현. 항상 "청구 성공"을 반환해
-/// 멱등 헤더를 사실상 무시하고 주문을 평소대로 등록한다(중복 방어 없음).
+/// Redis 미구성(단일 인스턴스 개발) 시의 무저장 구현. 멱등성을 보장하지 못하므로
+/// <see cref="IsDurable"/>=false다 — 호출부(ExecIdempotent)는 Idempotency-Key를 조용히
+/// 무시하지 않고 명시적으로 거부한다(M2). 헤더 없는 일반 주문 경로는 이 저장소를 거치지 않는다.
 /// </summary>
 public sealed class NullIdempotencyStore : IIdempotencyStore
 {
+    public bool IsDurable => false;
+
     public Task<IdempotencyClaim> TryClaimAsync(Guid playerId, string key)
         => Task.FromResult(new IdempotencyClaim(IdempotencyStatus.Claimed, null));
 

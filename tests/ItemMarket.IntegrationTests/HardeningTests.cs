@@ -42,6 +42,25 @@ public class HardeningTests(MarketAppFixture f)
         return c.SendAsync(msg);
     }
 
+    // ==================================================================== M2
+
+    // 멱등성(M2): Redis 미구성(Null 저장소=이 fixture)에서 Idempotency-Key가 오면 조용히 무시하지
+    // 않고 503 IdempotencyUnavailable로 명시적으로 거부한다. 헤더 없는 일반 주문은 영향받지 않는다.
+    [Fact]
+    public async Task Idempotency_key_is_rejected_when_store_is_not_durable()
+    {
+        var buyer = await _f.AuthedAs(Alpha);
+
+        // 헤더 있음 → 503 거부.
+        var withKey = await PostOrder(buyer, new PlaceOrderRequest(OrderSide.Buy, 8, 10, 1), idemKey: "demo-key-1");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, withKey.StatusCode);
+        Assert.Equal(ItemMarket.Contracts.Common.ErrorCode.IdempotencyUnavailable, (await Api<PlaceOrderResult>(withKey)).Error!.Code);
+
+        // 헤더 없음 → 평소대로 등록(멱등 경로를 타지 않음).
+        var noKey = await PostOrder(buyer, new PlaceOrderRequest(OrderSide.Buy, 8, 10, 1));
+        Assert.True((await Api<PlaceOrderResult>(noKey)).Success);
+    }
+
     // ==================================================================== A1
 
     // 재정렬된 취소 경로가 여전히 에스크로를 정확히 환불한다(기본 동작 보존).
