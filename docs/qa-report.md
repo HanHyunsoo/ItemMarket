@@ -237,6 +237,12 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 > (레이블은 A/B 섹션의 finding id와 대응.)
 
 ### 기능 — 정합성·계약·견고성
+- [x] **F-1** (최종 QA·Medium) A-1의 grain 경계 TOCTOU 완성 — `StashGrain`(Equip/Unequip/MoveStack)과
+      `RaidSessionGrain.StartRaid`는 별개 grain이라 Orleans가 서로 직렬화 못 한다. `pg_advisory_xact_lock`
+      (playerId)으로 DB 레벨 직렬화 + 변이 트랜잭션 내부에서 ACTIVE 레이드 재확인해 동시 인터리브의
+      500+소프트락을 차단. 동시성 회귀 테스트 `RaidTests.Concurrent_start_and_equip_never_soft_locks_extract` 추가.
+- [x] **만료 성공률 표기** (최종 QA·fun) 마감 초과 시 EXTRACT 버튼이 실제(0%)와 다른 성공률을 보이던 것을
+      "탈출 시도 · 실패 확정"으로 교정, 미터도 만료 시 0%. (`RaidView.vue`)
 - [x] **A-1** (후속 QA·High) 레이드 ACTIVE 중 스태시/장비 변이 잠금 — `Equip`/`Unequip`/`MoveItem`
       진입부에서 진행 중 세션이면 `RaidActive`(409) 거부. 잠그지 않으면 비운 슬롯/칸에 예비품이 들어가
       `Extract` 원위치 복원이 고유 제약과 충돌해 500 + 세션 소프트락이 났다. 회귀 테스트

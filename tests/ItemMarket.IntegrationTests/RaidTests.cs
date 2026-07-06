@@ -569,6 +569,33 @@ public class RaidTests(MarketAppFixture f)
         Assert.Equal(before - 3, await StackQty(e, 24));       // 반입한 3개 소실
     }
 
+    // F-1: 레이드 시작과 스태시/장비 변이가 grain 경계를 넘어 동시에 들어와도(StashGrain↔RaidSessionGrain은
+    // 별개 grain이라 Orleans가 서로 직렬화 못 함) advisory 락으로 DB에서 직렬화돼, Extract 원위치 복원이
+    // 고유 제약과 충돌하는 500(Unknown) 소프트락이 발생하지 않는다.
+    [Fact]
+    public async Task Concurrent_start_and_equip_never_soft_locks_extract()
+    {
+        var e = await _f.AuthedAs(Echo);
+        for (var round = 0; round < 8; round++)
+        {
+            await ClearAtRisk(Echo);   // 이전 라운드 세션·위험 배치 정리
+            await ClearEquipment(e);
+            var w1 = await GrantInstance(Echo, Pistol, 300);
+            var w2 = await GrantInstance(Echo, Pistol, 300); // 예비 무기(STASH)
+            await Stash(e);
+            await Equip(e, EquipSlot.Weapon, w1); // 반입 대상 착용
+
+            // 동시: Start(w1을 at-risk로 걷어가 슬롯 비움) vs Equip(빈 슬롯에 w2 착용 시도).
+            var startTask = Start(e);
+            var equipTask = e.PostAsJsonAsync("/api/equipment/equip", new EquipRequest(EquipSlot.Weapon, w2), Json);
+            await Task.WhenAll(startTask, equipTask);
+
+            // 핵심: Extract가 원위치 복원 충돌로 500(Unknown) 소프트락에 빠지지 않는다.
+            var ext = await Extract(e);
+            Assert.NotEqual(HttpStatusCode.InternalServerError, ext.StatusCode);
+        }
+    }
+
     // 원자성(best-effort 폴트 인젝션): 정산 도중 실패하면 전량 롤백된다.
     // 주머니 수량과 inventory_stack을 어긋나게(외부 변조) 만들어 StartRaid 스택 가드를 실패시키고,
     // 같은 트랜잭션에서 먼저 INSERT된 raid_session이 롤백되는지(ACTIVE 세션 미생성) 검증한다.

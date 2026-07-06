@@ -126,6 +126,8 @@ const timeCritical = computed(() => remainingMs.value !== null && remainingMs.va
 
 const deathChancePct = computed(() => Math.min(100, (raid.value?.deathChanceBps ?? 0) / 100))
 const survivalPct = computed(() => Math.max(0, 100 - deathChancePct.value))
+// 마감을 넘기면 extract는 서버에서 무조건 사망 정산되므로, 표시 성공률도 0으로 맞춘다(거짓 배당 방지).
+const effectiveSurvivalPct = computed(() => (expired.value ? 0 : survivalPct.value))
 
 function tplName(id: number): string {
   return catalog.get(id)?.name ?? `#${id}`
@@ -447,12 +449,15 @@ function goGear(): void {
           <div class="death-meter">
             <div class="meter-head mono">
               <span>탈출 성공률 · Survival</span>
-              <span :class="{ risky: deathChancePct >= 50 }">{{ survivalPct.toFixed(0) }}%</span>
+              <span :class="{ risky: expired || deathChancePct >= 50 }">
+                {{ effectiveSurvivalPct.toFixed(0) }}%
+              </span>
             </div>
             <div class="meter-track">
-              <div class="meter-fill" :style="{ width: deathChancePct + '%' }" />
+              <div class="meter-fill" :style="{ width: (expired ? 100 : deathChancePct) + '%' }" />
             </div>
-            <p class="meter-note mono wx-muted">
+            <p v-if="expired" class="meter-note mono wx-sell">시간 초과 — 탈출 시 사망 확정</p>
+            <p v-else class="meter-note mono wx-muted">
               획득할수록 사망확률 상승 — 현재 <b>{{ deathChancePct.toFixed(0) }}%</b> 사망 위험
             </p>
           </div>
@@ -464,7 +469,7 @@ function goGear(): void {
             :loading="resolving"
             @click="onExtract"
           >
-            탈출 · EXTRACT ({{ survivalPct.toFixed(0) }}%)
+            {{ expired ? '탈출 시도 · 실패 확정' : `탈출 · EXTRACT (${survivalPct.toFixed(0)}%)` }}
           </el-button>
           <el-button
             type="danger"

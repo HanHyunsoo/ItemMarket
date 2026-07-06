@@ -540,6 +540,9 @@ public sealed class MarketRepository(
         await using var tx = await db.BeginTransactionAsync();
         try
         {
+            await LockPlayerAsync(db, tx, playerId);        // F-1: 레이드 시작과 DB 레벨 직렬화
+            await ThrowIfActiveRaidAsync(db, tx, playerId);
+
             var fromDb = from.ToDb();
             var toDb = to.ToDb();
             var sourceRows = (await db.QueryAsync(
@@ -679,6 +682,10 @@ public sealed class MarketRepository(
         await using var tx = await db.BeginTransactionAsync();
         try
         {
+            // 레이드 시작과 DB 레벨 직렬화 후 레이드 중 변이 거부(F-1 — grain 경계 TOCTOU 차단).
+            await LockPlayerAsync(db, tx, playerId);
+            await ThrowIfActiveRaidAsync(db, tx, playerId);
+
             var inst = await db.QuerySingleOrDefaultAsync(
                 "SELECT owner_player_id, template_id FROM item_instance WHERE id = @instanceId FOR UPDATE",
                 new { instanceId }, tx);
@@ -725,6 +732,9 @@ public sealed class MarketRepository(
         await using var tx = await db.BeginTransactionAsync();
         try
         {
+            await LockPlayerAsync(db, tx, playerId);        // F-1: 레이드 시작과 DB 레벨 직렬화
+            await ThrowIfActiveRaidAsync(db, tx, playerId);
+
             var instanceId = await db.ExecuteScalarAsync<Guid?>(
                 "SELECT instance_id FROM player_equipment WHERE player_id = @playerId AND slot = @slot FOR UPDATE",
                 new { playerId, slot = slot.ToDb() }, tx);
@@ -1200,6 +1210,25 @@ public sealed class MarketRepository(
             new { playerId });
     }
 
+    /// <summary>플레이어 단위 advisory 트랜잭션 락. Orleans 단일 활성화는 같은 grain 안에서만 직렬화하므로,
+    /// grain 경계를 넘는 변이(레이드 시작(RaidSessionGrain) ↔ 스태시/장비 변이(StashGrain))의 TOCTOU를 막으려면
+    /// DB 레벨 공통 락이 필요하다(F-1). xact 락이라 트랜잭션 종료 시 자동 해제된다.</summary>
+    private static Task LockPlayerAsync(NpgsqlConnection db, NpgsqlTransaction tx, Guid playerId)
+        => db.ExecuteAsync("SELECT pg_advisory_xact_lock(hashtextextended(@key, 0))",
+            new { key = playerId.ToString() }, tx);
+
+    /// <summary>트랜잭션 내부에서 ACTIVE 레이드를 재확인해 변이를 거부한다(RaidActive). LockPlayerAsync와 함께
+    /// 쓰면 레이드 시작과 스태시/장비 변이가 DB에서 직렬화돼, grain 경계를 넘는 동시 호출의 TOCTOU가 닫힌다.</summary>
+    private static async Task ThrowIfActiveRaidAsync(NpgsqlConnection db, NpgsqlTransaction tx, Guid playerId)
+    {
+        var active = await db.ExecuteScalarAsync<bool>(
+            "SELECT EXISTS(SELECT 1 FROM raid_session WHERE player_id = @playerId AND status = 'ACTIVE')",
+            new { playerId }, tx);
+        if (active)
+            throw new DomainException(ErrorCode.RaidActive,
+                "레이드 진행 중에는 스태시·장비를 변경할 수 없습니다. 먼저 탈출하거나 사망 처리하세요.");
+    }
+
     public async Task<RaidSessionDto?> GetRaidSnapshotAsync(Guid playerId)
     {
         await using var db = Open();
@@ -1226,6 +1255,10 @@ public sealed class MarketRepository(
         await using var tx = await db.BeginTransactionAsync();
         try
         {
+            // 0) 스태시/장비 변이(Equip/Unequip/MoveStack)와 DB 레벨 직렬화 — grain 경계 TOCTOU 차단(F-1).
+            //    이 락을 잡은 뒤 at-risk를 걷어가므로, 동시에 들어온 변이는 락을 기다렸다가 ACTIVE를 보고 거부된다.
+            await LockPlayerAsync(db, tx, playerId);
+
             // 1) ACTIVE 중복 방지(부분 유니크 인덱스가 최종 강판; 명확한 에러 위해 선검사).
             var existing = await db.ExecuteScalarAsync<Guid?>(
                 "SELECT id FROM raid_session WHERE player_id = @playerId AND status = 'ACTIVE'",
