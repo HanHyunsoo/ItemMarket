@@ -246,8 +246,10 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       `IsDurable=false`)에서 `Idempotency-Key`가 오면 조용히 무시하지 않고 `503 IdempotencyUnavailable`로
       거부 + 경고 로그. 헤더 없는 일반 주문은 무영향. (`Program.cs`, `IdempotencyStore.cs`, `ApiResults.cs`,
       회귀 테스트 `HardeningTests.Idempotency_key_is_rejected_when_store_is_not_durable`)
-- [ ] **M3** OpenAPI enum — Swashbuckle 스키마 필터로 enum을 `type:string` + 값 목록으로 노출
-      (`JsonStringEnumConverter` 반영). (`SwaggerSetup`)
+- [x] **M3** OpenAPI enum — `StringEnumSchemaFilter`로 enum을 `type:string` + 이름 목록으로 노출
+      (런타임 `JsonStringEnumConverter` 계약과 일치). Swashbuckle이 minimal API JSON 옵션을 자동
+      반영하지 않아 정수로 표기하던 것을 교정. 회귀 테스트
+      `OpenApiTests.Openapi_exposes_enums_as_string_with_values` 추가. (`SwaggerSetup.cs`)
 - [x] **M1/BUG2** `GET /api/stash/container` → 500(NRE) 수정. 중첩 컨테이너는 인스턴스 id가 필수라 이
       라우트로 조회 불가 — `ParseContainer`가 `Container`를 400으로 거부(안내 메시지) + `GetStash`
       진입부 방어 가드로 이중화. 중첩 그리드는 `GET /api/equipment`의 `containers[]`로 노출됨.

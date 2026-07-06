@@ -1,6 +1,25 @@
+using System.Text.Json.Nodes;
 using Microsoft.OpenApi;
+using Swashbuckle.AspNetCore.SwaggerGen;
 
 namespace ItemMarket.Api.Infrastructure;
+
+/// <summary>
+/// enum을 정수 인덱스가 아니라 문자열 + 허용값 목록으로 노출한다(M3). 런타임 직렬화가
+/// JsonStringEnumConverter라 wire 계약이 문자열인데, Swashbuckle은 minimal API의 JSON 옵션을
+/// 자동 반영하지 않아 기본적으로 정수로 표기했다 — 생성 클라이언트/문서가 실제 계약과 어긋난다.
+/// </summary>
+public sealed class StringEnumSchemaFilter : ISchemaFilter
+{
+    public void Apply(IOpenApiSchema schema, SchemaFilterContext context)
+    {
+        if (!context.Type.IsEnum || schema is not OpenApiSchema s) return;
+        s.Type = JsonSchemaType.String;
+        s.Format = null;
+        s.Enum = Enum.GetNames(context.Type)
+            .Select(n => (JsonNode)JsonValue.Create(n)!).ToList();
+    }
+}
 
 /// <summary>
 /// Swagger/OpenAPI 구성. /swagger 에서 인터랙티브 문서를 제공하고, JWT Bearer 인증을
@@ -47,6 +66,7 @@ public static class SwaggerSetup
             });
 
             o.SupportNonNullableReferenceTypes();
+            o.SchemaFilter<StringEnumSchemaFilter>();
         });
         return builder;
     }
