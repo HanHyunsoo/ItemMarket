@@ -8,7 +8,7 @@ import { notifyWalletChanged } from '@/realtime/marketHub'
 import ItemGrid from '@/components/ItemGrid.vue'
 import ItemSprite from '@/components/ItemSprite.vue'
 import RaidItemRow from '@/components/RaidItemRow.vue'
-import { dateTime, shortId } from '@/utils/format'
+import { caps, dateTime, shortId } from '@/utils/format'
 import { toastError, toastSuccess } from '@/utils/toast'
 import { ApiClientError } from '@/api/client'
 import type {
@@ -93,6 +93,15 @@ const bringingNothing = computed(
 const broughtItems = computed(() => raid.value?.items.filter((i) => i.source === 'Brought') ?? [])
 const lootedItems = computed(() => raid.value?.items.filter((i) => i.source === 'Looted') ?? [])
 const atRiskCount = computed(() => raid.value?.items.reduce((n, i) => n + i.quantity, 0) ?? 0)
+// 사망 시 잃는 총 캡 가치(기준가 × 수량 합). 수량 합("점")은 로켓 1 + 탄약 200을 201로 오도하므로,
+// 판돈의 무게는 캡 가치로 보여준다(#9).
+const atRiskCaps = computed(
+  () =>
+    raid.value?.items.reduce(
+      (sum, i) => sum + (catalog.get(i.templateId)?.baseValue ?? 0) * i.quantity,
+      0,
+    ) ?? 0,
+)
 
 // ── 레이드 타이머(카운트다운) + 사망확률 미터 ──────────────────────────────
 // 마감(deadlineAt)까지 남은 시간을 1초 틱으로 표시한다. 0이 되면 다음 extract/loot에서
@@ -385,7 +394,9 @@ function goGear(): void {
             >
               ⏱ {{ expired ? '시간 초과' : remainingLabel }}
             </span>
-            <span class="risk-badge mono">{{ atRiskCount }} 점</span>
+            <span class="risk-badge mono" :title="`반입·획득 ${atRiskCount}개 · 사망 시 전부 소실`">
+              💰 {{ caps(atRiskCaps) }} 캡 노출
+            </span>
           </span>
         </div>
         <p v-if="expired" class="atrisk-warn mono expired-warn">

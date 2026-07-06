@@ -20,15 +20,17 @@ const balance = ref<number | null>(null)
 
 const navItems = computed(() => {
   const base = [
-    { name: 'market', label: 'Market' },
-    { name: 'inventory', label: 'Stash' },
-    { name: 'gear', label: '장비' },
-    { name: 'raid', label: '출격' },
-    { name: 'records', label: '기록' },
-    { name: 'wallet', label: 'Wallet' },
-    { name: 'orders', label: 'Orders' },
+    // 이중어(영·한) 라벨 통일. "Stash"는 GearView의 그리드 창고 명칭과 충돌하므로 소유 목록 화면은
+    // "Inventory·소지품"으로 구분한다(그리드 창고는 Gear·장비 안의 STASH).
+    { name: 'market', label: 'Market · 마켓' },
+    { name: 'inventory', label: 'Inventory · 소지품' },
+    { name: 'gear', label: 'Gear · 장비' },
+    { name: 'raid', label: 'Raid · 출격' },
+    { name: 'records', label: 'Records · 기록' },
+    { name: 'wallet', label: 'Wallet · 지갑' },
+    { name: 'orders', label: 'Orders · 주문' },
   ]
-  if (isAdmin.value) base.push({ name: 'admin', label: 'Admin' })
+  if (isAdmin.value) base.push({ name: 'admin', label: 'Admin · 운영' })
   return base
 })
 

@@ -53,8 +53,8 @@ function open(templateId: number) {
 
 <template>
   <div v-loading="loading">
-    <h1 class="wx-page-title">Stash</h1>
-    <p class="wx-page-sub">Your salvaged loot — stacks and unique gear</p>
+    <h1 class="wx-page-title">Inventory · 소지품</h1>
+    <p class="wx-page-sub">보유 중인 전리품 — 스택 + 유니크 장비 (그리드 창고는 Gear · 장비)</p>
 
     <h3 class="wx-section-title">Stacks</h3>
     <div class="grid">
@@ -73,7 +73,7 @@ function open(templateId: number) {
       </button>
       <div v-if="!loading && stacks.length === 0" class="wx-empty">
         <img class="pixel" src="/sprites/food_can.svg" alt="" />
-        Stash is empty. Go loot something.
+        소지품이 비었습니다. 출격해서 전리품을 챙겨오세요.
       </div>
     </div>
 
