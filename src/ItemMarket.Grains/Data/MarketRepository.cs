@@ -1010,13 +1010,13 @@ public sealed class MarketRepository(string connectionString)
     {
         await using var db = Open();
         var s = await db.QuerySingleOrDefaultAsync(
-            @"SELECT id, player_id, status, started_at, resolved_at
+            @"SELECT id, player_id, status
               FROM raid_session WHERE player_id = @playerId AND status = 'ACTIVE'
               LIMIT 1",
             new { playerId });
         if (s is null) return null;
         return await LoadRaidDtoAsync(db, null, (Guid)s.id, (Guid)s.player_id,
-            Enums.ToRaidStatus((string)s.status), (DateTimeOffset)s.started_at, (DateTimeOffset?)s.resolved_at);
+            Enums.ToRaidStatus((string)s.status));
     }
 
     /// <summary>
@@ -1156,7 +1156,7 @@ public sealed class MarketRepository(string connectionString)
                         new { playerId, instanceId }, tx);
             }
 
-            var dto = await LoadRaidDtoAsync(db, tx, sessionId, playerId, RaidStatus.Active, DateTimeOffset.UtcNow, null);
+            var dto = await LoadRaidDtoAsync(db, tx, sessionId, playerId, RaidStatus.Active);
             await tx.CommitAsync();
             return dto;
         }
@@ -1227,7 +1227,7 @@ public sealed class MarketRepository(string connectionString)
                     new { sessionId, templateId = req.TemplateId, instanceId }, tx);
             }
 
-            var dto = await LoadRaidDtoAsync(db, tx, sessionId.Value, playerId, RaidStatus.Active, DateTimeOffset.UtcNow, null);
+            var dto = await LoadRaidDtoAsync(db, tx, sessionId.Value, playerId, RaidStatus.Active);
             await tx.CommitAsync();
             return dto;
         }
@@ -1260,13 +1260,12 @@ public sealed class MarketRepository(string connectionString)
         try
         {
             var session = await db.QuerySingleOrDefaultAsync(
-                @"SELECT id, started_at FROM raid_session
+                @"SELECT id FROM raid_session
                   WHERE player_id = @playerId AND status = 'ACTIVE' FOR UPDATE",
                 new { playerId }, tx);
             if (session is null)
                 throw new DomainException(ErrorCode.RaidNotFound, "진행 중인 레이드가 없습니다.");
             Guid sessionId = (Guid)session.id;
-            var startedAt = (DateTimeOffset)session.started_at;
 
             var items = (await db.QueryAsync(
                 @"SELECT kind, template_id, instance_id, quantity, source,
@@ -1329,12 +1328,11 @@ public sealed class MarketRepository(string connectionString)
             }
 
             var newStatus = extracted ? RaidStatus.Extracted : RaidStatus.Died;
-            var resolvedAt = DateTimeOffset.UtcNow;
             await db.ExecuteAsync(
                 "UPDATE raid_session SET status = @status, resolved_at = now() WHERE id = @sessionId",
                 new { status = newStatus.ToDb(), sessionId }, tx);
 
-            var dto = await LoadRaidDtoAsync(db, tx, sessionId, playerId, newStatus, startedAt, resolvedAt);
+            var dto = await LoadRaidDtoAsync(db, tx, sessionId, playerId, newStatus);
             await tx.CommitAsync();
             return dto;
         }
@@ -1537,18 +1535,23 @@ public sealed class MarketRepository(string connectionString)
         }
     }
 
-    /// <summary>세션 + 위험 아이템 목록을 RaidSessionDto로 조립.</summary>
+    /// <summary>세션 + 위험 아이템 목록을 RaidSessionDto로 조립. started_at/resolved_at은
+    /// 앱 시각을 넘겨받지 않고 DB에서 읽는다(단일 진실 소스) — AddLoot가 출격 시각 대신 loot
+    /// 호출 시각을 반환하던 버그를 근본 제거하고, StartRaid/Resolve의 앱시각↔DB now() 불일치도 없앤다.</summary>
     private static async Task<RaidSessionDto> LoadRaidDtoAsync(
-        NpgsqlConnection db, NpgsqlTransaction? tx, Guid sessionId, Guid playerId,
-        RaidStatus status, DateTimeOffset startedAt, DateTimeOffset? resolvedAt)
+        NpgsqlConnection db, NpgsqlTransaction? tx, Guid sessionId, Guid playerId, RaidStatus status)
     {
+        var s = await db.QuerySingleAsync(
+            "SELECT started_at, resolved_at FROM raid_session WHERE id = @sessionId",
+            new { sessionId }, tx);
         var items = (await db.QueryAsync(
             "SELECT kind, template_id, instance_id, quantity, source FROM raid_session_item WHERE session_id = @sessionId ORDER BY id",
             new { sessionId }, tx))
             .Select(r => new RaidSessionItemDto(
                 Enums.ToStashKind((string)r.kind), (int)r.template_id, (Guid?)r.instance_id,
                 (int)r.quantity, Enums.ToRaidSource((string)r.source))).ToList();
-        return new RaidSessionDto(sessionId, playerId, status, startedAt, resolvedAt, items);
+        return new RaidSessionDto(sessionId, playerId, status,
+            (DateTimeOffset)s.started_at, (DateTimeOffset?)s.resolved_at, items);
     }
 
     private static Task InsertItemLedgerAsync(

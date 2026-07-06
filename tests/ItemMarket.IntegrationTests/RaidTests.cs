@@ -364,6 +364,38 @@ public class RaidTests(MarketAppFixture f)
         Assert.Equal(ErrorCode.RaidNotFound, (await Api<RaidSessionDto>(noActive)).Error!.Code);
     }
 
+    // B(raid): StartedAt/ResolvedAt은 앱 시각이 아니라 DB에서 읽는다. AddLoot가 출격 시각 대신
+    // loot 호출 시각을 반환하던 버그 회귀 방지 — AddLoot를 여러 번 해도 StartedAt은 최초 출격 시각으로 불변.
+    [Fact]
+    public async Task Raid_timestamps_come_from_db_and_startedat_is_stable_across_loot()
+    {
+        var e = await _f.AuthedAs(Echo);
+        await ClearAtRisk(Echo);
+        await ClearEquipment(e);
+
+        await GrantStack(Echo, 24, 3); // 건빵 — 주머니로 반입
+        await Stash(e);
+        await BringStackToPockets(e, 24, 3, 0);
+
+        var started = await Api<RaidSessionDto>(await Start(e));
+        Assert.True(started.Success);
+        var startedAt = started.Data!.StartedAt;
+        Assert.Null(started.Data.ResolvedAt);
+
+        // AddLoot 두 번 — StartedAt은 최초 출격 시각으로 불변(loot 시각으로 바뀌지 않음).
+        var loot1 = await Api<RaidSessionDto>(await Loot(e, new AddLootRequest(StashEntryKind.Stack, 94, 2)));
+        Assert.Equal(startedAt, loot1.Data!.StartedAt);
+        var loot2 = await Api<RaidSessionDto>(await Loot(e, new AddLootRequest(StashEntryKind.Stack, 94, 1)));
+        Assert.Equal(startedAt, loot2.Data!.StartedAt);
+
+        // Extract: ResolvedAt이 DB에서 채워지고 StartedAt은 여전히 불변, Started <= Resolved.
+        var ex = await Api<RaidSessionDto>(await Extract(e));
+        Assert.True(ex.Success);
+        Assert.Equal(startedAt, ex.Data!.StartedAt);
+        Assert.NotNull(ex.Data.ResolvedAt);
+        Assert.True(ex.Data.StartedAt <= ex.Data.ResolvedAt);
+    }
+
     // 원자성(best-effort 폴트 인젝션): 정산 도중 실패하면 전량 롤백된다.
     // 주머니 수량과 inventory_stack을 어긋나게(외부 변조) 만들어 StartRaid 스택 가드를 실패시키고,
     // 같은 트랜잭션에서 먼저 INSERT된 raid_session이 롤백되는지(ACTIVE 세션 미생성) 검증한다.

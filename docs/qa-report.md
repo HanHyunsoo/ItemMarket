@@ -253,8 +253,11 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       진입부 방어 가드로 이중화. 중첩 그리드는 `GET /api/equipment`의 `containers[]`로 노출됨.
       회귀 테스트 `StashTests.Get_stash_by_container_rejects_nested_container_with_400` 추가.
       (`StashEndpoints.cs`, `StashGrain.cs`)
-- [ ] **B(raid) StartedAt/ResolvedAt** — `LoadRaidDtoAsync`가 `started_at`/`resolved_at`을 DB에서 읽도록.
-      (`MarketRepository.cs:1230,1331,1540-1550`)
+- [x] **B(raid) StartedAt/ResolvedAt** — `LoadRaidDtoAsync`가 `started_at`/`resolved_at`을 DB에서 읽는다
+      (파라미터 제거). AddLoot가 출격 시각 대신 loot 호출 시각을 반환하던 버그를 근본 제거하고,
+      StartRaid/Resolve의 앱시각↔DB `now()` 불일치도 없앴다. 회귀 테스트
+      `RaidTests.Raid_timestamps_come_from_db_and_startedat_is_stable_across_loot` 추가.
+      (`MarketRepository.cs`)
 - [ ] **BUG D** loot 수량 상한 — `AddLootAsync`에서 `max_stack` 기준 검증/분할(현재 `1..1_000_000`만).
       (`MarketRepository.cs:1205`)
 - [ ] **L2/BUG4** 음수·0·null Quantity 검증 — 빈 풀 분기에도 하한 검증 추가(`ValidationError`).
