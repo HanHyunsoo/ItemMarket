@@ -6,6 +6,8 @@ import ItemGrid from '@/components/ItemGrid.vue'
 import ItemSprite from '@/components/ItemSprite.vue'
 import ItemDetailModal from '@/components/ItemDetailModal.vue'
 import { useGridDnd } from '@/composables/useGridDnd'
+import { notifyWalletChanged } from '@/realtime/marketHub'
+import { caps } from '@/utils/format'
 import { toastError, toastSuccess } from '@/utils/toast'
 import type {
   EquipSlot,
@@ -33,6 +35,29 @@ const inventory = ref<InventoryDto | null>(null)
 const loading = ref(false)
 const busy = ref(false)
 const slotHover = ref<EquipSlot | null>(null)
+
+// ── 창고 확장(캡 싱크): +6행 구매. 가격은 백엔드와 동일한 점증 공식으로 미리 보여준다. ──
+const STASH_MAX = 500
+const upgrading = ref(false)
+const nextUpgradeCost = computed(() => {
+  const rows = stash.value?.gridH ?? 60
+  return 2000 + Math.max(0, Math.floor((rows - 60) / 6)) * 1000
+})
+const canUpgrade = computed(() => (stash.value?.gridH ?? STASH_MAX) + 6 <= STASH_MAX)
+
+async function onUpgrade(): Promise<void> {
+  upgrading.value = true
+  try {
+    const res = await stashApi.upgrade()
+    stash.value = await stashApi.get('Stash') // 그리드가 6행 늘어난 스냅샷으로 갱신
+    notifyWalletChanged() // 헤더 캡 칩 갱신
+    toastSuccess(`창고 확장 — ${res.stashRows}행 (−${caps(res.cost)} 캡)`)
+  } catch (err) {
+    toastError(err, '창고 확장 실패.')
+  } finally {
+    upgrading.value = false
+  }
+}
 
 // Instance detail lookup (durability/attachments/provenance) for the modal —
 // /api/inventory returns every owned instance, equipped and nested included.
@@ -240,6 +265,15 @@ function inspectSlot(slot: EquipSlot): void {
         <div class="grid-scroll stash-scroll">
           <ItemGrid :stash="stash" :busy="busy" @move="onMove" @inspect="inspectPlacement" />
         </div>
+        <button
+          class="upgrade-btn mono"
+          :disabled="!canUpgrade || upgrading"
+          :title="canUpgrade ? '캡으로 창고를 6행 확장' : `최대 크기(${STASH_MAX}행)`"
+          @click="onUpgrade"
+        >
+          <template v-if="canUpgrade">＋ 창고 확장 +6행 · {{ caps(nextUpgradeCost) }} 캡</template>
+          <template v-else>창고 최대 크기</template>
+        </button>
       </section>
 
       <!-- RIGHT: character -->
@@ -403,6 +437,35 @@ function inspectSlot(slot: EquipSlot): void {
   font-size: 11px;
   color: var(--wx-text-faint);
   letter-spacing: 1px;
+}
+/* 창고 확장 버튼(캡 싱크) */
+.upgrade-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--wx-amber-bright);
+  background: rgba(208, 160, 64, 0.08);
+  border: 1px dashed var(--wx-amber-bright);
+  border-radius: var(--wx-r-sm);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    transform 0.1s;
+}
+.upgrade-btn:hover:not(:disabled) {
+  background: rgba(208, 160, 64, 0.16);
+}
+.upgrade-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.upgrade-btn:disabled {
+  color: var(--wx-text-faint);
+  border-color: var(--wx-border);
+  background: transparent;
+  cursor: not-allowed;
 }
 
 /* ---- character doll slots ---- */

@@ -242,6 +242,13 @@ export interface RaidSessionDto {
   deathChanceBps: number // 누적 사망확률(bps). extract 시 이 확률로 사망 롤. 표시는 min(10000).
 }
 
+// 스태시 행 확장 구매 결과: 새 행 수, 지불한 캡, 갱신 잔액.
+export interface StashUpgradeResultDto {
+  stashRows: number
+  cost: number
+  balance: number
+}
+
 // 출격 존(리스크/보상 티어). 드롭 rarity 가중치와 loot당 사망확률 상승률을 함께 결정한다.
 export type RaidZone = 'Low' | 'Med' | 'High'
 

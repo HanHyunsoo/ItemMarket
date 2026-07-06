@@ -310,7 +310,9 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       존(Low/Med/High)이 rarity 가중치·loot당 사망확률 상승률을 함께 결정(리스크/보상, #1 연동).
       계약 breaking(loot 서버 결정·LootResultDto·StartRaidRequest zone). (`MarketRepository.cs`, `RaidView.vue`, 테스트 재작성)
 - [ ] **#4** loot마다 사망 확률 상승(그리드 미터). `[중]`
-- [ ] **#5** 목적 있는 캡 싱크(스태시 행 업그레이드·내구도/수리·보험·출격 수수료). `[중]`
+- [x] **#5** 목적 있는 캡 싱크 — 캡으로 스태시 행 확장(+6행, 점증 가격) `POST /api/stash/upgrade`.
+      #3로 유한해진 loot 경제에 "파밍→거래→창고 확장" 루프를 닫는다. GearView에 확장 버튼(다음 가격).
+      (`MarketRepository.UpgradeStashRowsAsync`, `GearView.vue`) — 내구도/수리·보험·출격 수수료는 향후.
 - [ ] **#6** 첫 방문 온보딩(루프 설명 스트립/오버레이). `[하]`
 - [ ] **#7** 이중어 네비 통일 + Stash/Gear 명칭 충돌 해소. `[하]`
 - [ ] **#9** 출격 매니페스트에 총 at-risk 가치(캡) 표시. `[하]`

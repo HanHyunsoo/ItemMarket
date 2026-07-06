@@ -26,6 +26,7 @@ import type {
   RaidZone,
   RefreshRequest,
   StashDto,
+  StashUpgradeResultDto,
   TokenResponse,
   TradeDto,
   UnequipRequest,
@@ -72,6 +73,8 @@ export const stashApi = {
     api.get<StashDto>(`/api/stash/${container.toLowerCase()}`),
   // move returns the toContainer's snapshot; callers reconcile the fromContainer separately.
   move: (body: MoveStashItemRequest) => api.post<StashDto>('/api/stash/move', body),
+  // 캡으로 스태시 +6행 확장(캡 싱크).
+  upgrade: () => api.post<StashUpgradeResultDto>('/api/stash/upgrade'),
 }
 
 // ---- Raid / Extraction ----
