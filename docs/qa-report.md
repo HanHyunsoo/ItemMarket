@@ -242,6 +242,10 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       `Extract` 원위치 복원이 고유 제약과 충돌해 500 + 세션 소프트락이 났다. 회귀 테스트
       `RaidTests.Stash_and_equipment_mutations_are_locked_during_active_raid` 추가.
       (`StashGrain.cs`, `MarketRepository.HasActiveRaidAsync`)
+- [x] **A-2** (후속 QA·Medium) 어드민 아이템 지급 원장 기록 — `AdminGrantStack/InstanceAsync`를
+      트랜잭션화하고 `item_ledger`에 `ADMIN_GRANT`(+qty/+1) 기록(지갑 `AdminAdjust`와 대칭). enum·DDL·
+      미러가 광고하던 사유를 실제로 방출해 아이템 원장을 완결화. 회귀 테스트
+      `MarketFlowTests.Admin_item_grant_is_recorded_in_item_ledger` 추가. (`MarketRepository.cs`)
 - [x] **M4** 사망 시 `item_ledger` 대칭화 — 사망 정산에서 `RaidLoss` insert 제거. 반입분은 출격
       `RaidBrought`(−)로 이미 손실이 회계돼 재차감=이중차감이었고, 전리품은 사전 크레딧이 없어
       `RaidLoss`(−)만 남으면 유령 음수였다. 물리 tombstone(유니크 `owner=NULL,origin=RAID_LOST`)은

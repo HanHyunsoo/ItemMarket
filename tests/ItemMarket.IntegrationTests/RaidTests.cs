@@ -495,7 +495,8 @@ public class RaidTests(MarketAppFixture f)
         var snap = await Api<RaidSessionDto?>(await fx.GetAsync("/api/raid"));
         Assert.True(snap.Data is null || snap.Data.Status != RaidStatus.Active);
 
-        // 유니크(장착 무기)는 여전히 소유(instance 루프까지 도달하지 않고 롤백), 원장/세션아이템도 미기록.
+        // 유니크(장착 무기)는 여전히 소유(instance 루프까지 도달하지 않고 롤백), RAID_* 원장/세션아이템도 미기록.
+        // (셋업 지급의 ADMIN_GRANT 원장은 정상 존재하므로 RAID 사유만 카운트한다.)
         Assert.True(await Owns(fx, pistol));
         Assert.Contains((await Equipment(fx)).Slots, s => s.InstanceId == pistol);
         await using (var db = new NpgsqlConnection(_f.ConnString))
@@ -505,7 +506,7 @@ public class RaidTests(MarketAppFixture f)
                 "SELECT count(*) FROM raid_session WHERE player_id = @p", new { p = Foxtrot });
             Assert.Equal(0, sessions);
             var ledger = await db.ExecuteScalarAsync<long>(
-                "SELECT count(*) FROM item_ledger WHERE player_id = @p", new { p = Foxtrot });
+                "SELECT count(*) FROM item_ledger WHERE player_id = @p AND reason LIKE 'RAID%'", new { p = Foxtrot });
             Assert.Equal(0, ledger);
         }
 

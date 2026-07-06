@@ -184,4 +184,29 @@ public class MarketFlowTests(MarketAppFixture f)
             await db.ExecuteAsync("UPDATE market_config SET value = '500' WHERE key = 'fee_bps'"); // 시드값 원복
         }
     }
+
+    // A-2: 어드민 아이템 지급이 item_ledger에 ADMIN_GRANT로 기록된다(지갑 AdminAdjust와 대칭).
+    [Fact]
+    public async Task Admin_item_grant_is_recorded_in_item_ledger()
+    {
+        var admin = await _f.AuthedAs(Charlie);
+        var player = await _f.AuthedAs(Bravo);
+
+        // 스택 지급 → ADMIN_GRANT +qty.
+        (await admin.PostAsJsonAsync("/api/admin/grant/stack", new AdminGrantStackRequest(Bravo, 5, 7), Json))
+            .EnsureSuccessStatusCode();
+        var afterStack = await Api<PagedResult<ItemLedgerEntryDto>>(
+            await player.GetAsync("/api/inventory/ledger?page=1&size=200"));
+        Assert.Contains(afterStack.Data!.Items,
+            l => l.Reason == ItemLedgerReason.AdminGrant && l.TemplateId == 5 && l.DeltaQty == 7);
+
+        // 유니크 지급 → ADMIN_GRANT +1 (인스턴스 id 일치).
+        var g = await Api<ItemInstanceDto>(await admin.PostAsJsonAsync(
+            "/api/admin/grant/instance", new AdminGrantInstanceRequest(Bravo, 74, 300, null), Json));
+        Assert.True(g.Success);
+        var afterInst = await Api<PagedResult<ItemLedgerEntryDto>>(
+            await player.GetAsync("/api/inventory/ledger?page=1&size=200"));
+        Assert.Contains(afterInst.Data!.Items,
+            l => l.Reason == ItemLedgerReason.AdminGrant && l.InstanceId == g.Data!.Id && l.DeltaQty == 1);
+    }
 }

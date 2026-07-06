@@ -263,7 +263,20 @@ public sealed class MarketRepository(string connectionString)
             throw new DomainException(ErrorCode.ValidationError, "지급 수량은 1 이상 1,000,000 이하이어야 합니다.");
         await using var db = Open();
         await ValidateGrantTargetAsync(db, playerId, templateId, expectStackable: true);
-        await UpsertStackAsync(db, null, playerId, templateId, qty);
+        // 지급을 한 트랜잭션으로: inventory_stack 가산 + item_ledger(ADMIN_GRANT) 기록(A-2 —
+        // 지갑 AdminAdjust와 대칭. 광고된 ADMIN_GRANT 사유를 실제로 방출해 아이템 원장을 완결화).
+        await using var tx = await db.BeginTransactionAsync();
+        try
+        {
+            await UpsertStackAsync(db, tx, playerId, templateId, qty);
+            await InsertItemLedgerAsync(db, tx, playerId, StashEntryKind.Stack, templateId, null, qty, ItemLedgerReason.AdminGrant, null);
+            await tx.CommitAsync();
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
         return await GetInventoryAsync(playerId);
     }
 
@@ -275,11 +288,24 @@ public sealed class MarketRepository(string connectionString)
         await ValidateGrantTargetAsync(db, playerId, templateId, expectStackable: false);
         var id = Guid.NewGuid();
         var attJson = System.Text.Json.JsonSerializer.Serialize(attachments ?? []);
-        var row = await db.QuerySingleAsync(
-            @"INSERT INTO item_instance(id, template_id, owner_player_id, durability, attachments, origin)
-              VALUES (@id, @templateId, @playerId, @durability, @attJson::jsonb, 'ADMIN_GRANT')
-              RETURNING id, template_id, durability, attachments, created_at",
-            new { id, templateId, playerId, durability, attJson });
+        // 지급을 한 트랜잭션으로: item_instance 생성 + item_ledger(ADMIN_GRANT) 기록(A-2 — 지갑 AdminAdjust와 대칭).
+        await using var tx = await db.BeginTransactionAsync();
+        dynamic row;
+        try
+        {
+            row = await db.QuerySingleAsync(
+                @"INSERT INTO item_instance(id, template_id, owner_player_id, durability, attachments, origin)
+                  VALUES (@id, @templateId, @playerId, @durability, @attJson::jsonb, 'ADMIN_GRANT')
+                  RETURNING id, template_id, durability, attachments, created_at",
+                new { id, templateId, playerId, durability, attJson }, tx);
+            await InsertItemLedgerAsync(db, tx, playerId, StashEntryKind.Instance, templateId, id, 1, ItemLedgerReason.AdminGrant, null);
+            await tx.CommitAsync();
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
         return new ItemInstanceDto(
             (Guid)row.id, (int)row.template_id, (int?)row.durability,
             System.Text.Json.JsonSerializer.Deserialize<List<string>>((string)row.attachments) ?? [],
