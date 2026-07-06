@@ -264,7 +264,9 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 - [x] **L2/BUG4** 음수·0 Quantity 검증 — `MoveStackAsync` 진입부에 하한(≥1) 공통 가드 추가. 빈 풀
       분기가 음수·0을 조용히 no-op 성공으로 흘려보내던 비일관 제거. 회귀 테스트
       `StashTests.Stack_move_with_non_positive_quantity_is_rejected` 추가. (`MarketRepository.cs`)
-- [ ] **L7** `fee_bps` `[0,10000]` 클램프. (`MarketRepository.cs:37-43`)
+- [x] **L7** `fee_bps` `[0,10000]` 클램프 — `GetFeeBpsAsync`가 `Math.Clamp`. 설정 경로가 없어 읽는
+      지점이 유일 방어(음수=돈 발행, 초과=체결액 초과 수수료 차단). 회귀 테스트
+      `MarketFlowTests.Fee_bps_is_clamped_to_valid_range` 추가. (`MarketRepository.cs`)
 - [ ] **L8** 레이트리밋 임계 재설정(현재 1000/10s). (`RateLimiting.cs:23-24`, `appsettings.json:27`)
 - [ ] **L9(a)** 에스크로+주문 INSERT 동일 트랜잭션 or 멱등 재조정(커밋-후-예외 이중환불 창).
       (`OrderBookEngine.cs:150-177`)

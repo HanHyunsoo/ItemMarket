@@ -39,7 +39,9 @@ public sealed class MarketRepository(string connectionString)
         await using var db = Open();
         var v = await db.ExecuteScalarAsync<string?>(
             "SELECT value FROM market_config WHERE key = 'fee_bps'");
-        return int.TryParse(v, out var bps) ? bps : 500;
+        // fee_bps는 [0,10000](=0~100%)로 클램프한다. 설정 경로가 없어 이 읽기 지점이 유일 방어 —
+        // 음수는 음수 수수료(돈 발행), 10000 초과는 체결액을 넘는 수수료가 되므로 원천 차단(L7).
+        return Math.Clamp(int.TryParse(v, out var bps) ? bps : 500, 0, 10000);
     }
 
     public async Task<PlayerRow?> GetPlayerAsync(Guid id)

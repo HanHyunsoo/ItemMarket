@@ -49,6 +49,9 @@ public sealed class MarketAppFixture : IAsyncLifetime
     /// <summary>일회용 Postgres 연결 문자열(테스트에서 item_ledger 등 직접 검증용).</summary>
     public string ConnString => _pg.GetConnectionString();
 
+    /// <summary>호스트 DI(리포지토리 등 서버 내부 서비스를 직접 호출해 검증할 때).</summary>
+    public IServiceProvider Services => _app.Services;
+
     public async Task InitializeAsync()
     {
         await _pg.StartAsync();

@@ -6,6 +6,10 @@ using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Orders;
 using ItemMarket.Contracts.Trades;
 using ItemMarket.Contracts.Wallet;
+using ItemMarket.Grains.Data;
+using Dapper;
+using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 using Xunit;
 using static ItemMarket.IntegrationTests.MarketAppFixture;
 
@@ -154,5 +158,30 @@ public class MarketFlowTests(MarketAppFixture f)
             await buyer.GetAsync("/api/market/94/trades?page=1&size=50"));
         Assert.Equal(1, trades.Data!.TotalCount);      // 체결 정확히 1건
         Assert.Equal(1, await StackQty(buyer, 94));    // 구매자 1개만 수령
+    }
+
+    // L7: fee_bps는 설정 경로가 없어 읽는 지점(GetFeeBpsAsync)이 유일 방어 — [0,10000]으로 클램프한다.
+    // 음수(음수 수수료=돈 발행)·10000 초과(체결액 초과 수수료)를 차단한다. 전역 설정이라 finally로 원복.
+    [Fact]
+    public async Task Fee_bps_is_clamped_to_valid_range()
+    {
+        var repo = _f.Services.GetRequiredService<MarketRepository>();
+        await using var db = new NpgsqlConnection(_f.ConnString);
+        await db.OpenAsync();
+        try
+        {
+            await db.ExecuteAsync("UPDATE market_config SET value = '-100' WHERE key = 'fee_bps'");
+            Assert.Equal(0, await repo.GetFeeBpsAsync());
+
+            await db.ExecuteAsync("UPDATE market_config SET value = '20000' WHERE key = 'fee_bps'");
+            Assert.Equal(10000, await repo.GetFeeBpsAsync());
+
+            await db.ExecuteAsync("UPDATE market_config SET value = '250' WHERE key = 'fee_bps'");
+            Assert.Equal(250, await repo.GetFeeBpsAsync());
+        }
+        finally
+        {
+            await db.ExecuteAsync("UPDATE market_config SET value = '500' WHERE key = 'fee_bps'"); // 시드값 원복
+        }
     }
 }
