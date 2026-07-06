@@ -81,6 +81,23 @@ public class StashTests(MarketAppFixture f)
         Assert.Equal(ErrorCode.ValidationError, (await Api<StashDto>(unknown)).Error!.Code);
     }
 
+    // L2/BUG4: 스택 이동 수량 하한(<1)은 모든 경로에서 거부된다(빈 풀 분기가 음수·0을 조용히
+    // no-op 성공으로 흘려보내던 비일관 제거). template 1은 Alpha 시드 스택(자동 배치됨).
+    [Fact]
+    public async Task Stack_move_with_non_positive_quantity_is_rejected()
+    {
+        var alpha = await _f.AuthedAs(Alpha);
+        await GetStash(alpha); // 소유 스택 자동 배치
+
+        foreach (var bad in new[] { 0, -5 })
+        {
+            var res = await alpha.PostAsJsonAsync("/api/stash/move",
+                new MoveStashItemRequest(StashEntryKind.Stack, 1, null, 3, 3, Quantity: bad), Json);
+            Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+            Assert.Equal(ErrorCode.ValidationError, (await Api<StashDto>(res)).Error!.Code);
+        }
+    }
+
     // 유효 이동: 빈 칸으로 옮기면 그 좌표가 반영된다.
     [Fact]
     public async Task Valid_move_updates_position()

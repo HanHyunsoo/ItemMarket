@@ -416,6 +416,11 @@ public sealed class MarketRepository(string connectionString)
         Guid playerId, int templateId, GridContainer from, Guid? fromCid,
         GridContainer to, Guid? toCid, int toX, int toY, int? requestedQty, int maxStack)
     {
+        // 수량이 지정됐으면 하한(≥1)을 두 분기 공통으로 검증한다 — 빈 풀 분기가 음수·0 요청을
+        // 조용히 no-op 성공으로 흘려보내던 계약 비일관을 없앤다(L2/BUG4). 상한은 분기별로 검증.
+        if (requestedQty is { } rq && rq < 1)
+            throw new DomainException(ErrorCode.ValidationError, "이동 수량은 1 이상이어야 합니다.");
+
         await using var db = Open();
         await using var tx = await db.BeginTransactionAsync();
         try

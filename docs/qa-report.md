@@ -261,8 +261,9 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 - [x] **BUG D** loot 수량 상한 — `AddLootAsync`가 `max_stack` 기준으로 검증(초과 시 `ValidationError`).
       한 번의 픽업은 한 스택 상한을 넘을 수 없다(무한 픽업 차단). Extract 시점 인벤 분할 배치는 유지.
       회귀 테스트 `RaidTests.Loot_quantity_over_max_stack_is_rejected` 추가. (`MarketRepository.cs`)
-- [ ] **L2/BUG4** 음수·0·null Quantity 검증 — 빈 풀 분기에도 하한 검증 추가(`ValidationError`).
-      (`MarketRepository.cs:459-468`)
+- [x] **L2/BUG4** 음수·0 Quantity 검증 — `MoveStackAsync` 진입부에 하한(≥1) 공통 가드 추가. 빈 풀
+      분기가 음수·0을 조용히 no-op 성공으로 흘려보내던 비일관 제거. 회귀 테스트
+      `StashTests.Stack_move_with_non_positive_quantity_is_rejected` 추가. (`MarketRepository.cs`)
 - [ ] **L7** `fee_bps` `[0,10000]` 클램프. (`MarketRepository.cs:37-43`)
 - [ ] **L8** 레이트리밋 임계 재설정(현재 1000/10s). (`RateLimiting.cs:23-24`, `appsettings.json:27`)
 - [ ] **L9(a)** 에스크로+주문 INSERT 동일 트랜잭션 or 멱등 재조정(커밋-후-예외 이중환불 창).
