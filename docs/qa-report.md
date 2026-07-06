@@ -243,6 +243,11 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       500+소프트락을 차단. 동시성 회귀 테스트 `RaidTests.Concurrent_start_and_equip_never_soft_locks_extract` 추가.
 - [x] **만료 성공률 표기** (최종 QA·fun) 마감 초과 시 EXTRACT 버튼이 실제(0%)와 다른 성공률을 보이던 것을
       "탈출 시도 · 실패 확정"으로 교정, 미터도 만료 시 0%. (`RaidView.vue`)
+- [x] **F-2** (최종 QA·Low) 존 값 검증 — `StartRaidAsync`가 `Enum.IsDefined`로 범위 밖 zone 정수를
+      `ValidationError` 거부 + DDL `CHECK (zone IN ('Low','Med','High'))` 이중 방어. 회귀 테스트
+      `RaidTests.Start_raid_rejects_unknown_zone`. (`MarketRepository.cs`, `db/ddl.sql`)
+- [x] **F-3** (최종 QA·Low) DDL 주석 정합 — LOOTED 유니크 materialize 시점을 "Extract 시점"→"loot(scavenge)
+      시점(owner=NULL/origin=RAID 즉시 생성, Extract 시 소유 부여)"으로 정정. (`db/ddl.sql`)
 - [x] **A-1** (후속 QA·High) 레이드 ACTIVE 중 스태시/장비 변이 잠금 — `Equip`/`Unequip`/`MoveItem`
       진입부에서 진행 중 세션이면 `RaidActive`(409) 거부. 잠그지 않으면 비운 슬롯/칸에 예비품이 들어가
       `Extract` 원위치 복원이 고유 제약과 충돌해 500 + 세션 소프트락이 났다. 회귀 테스트

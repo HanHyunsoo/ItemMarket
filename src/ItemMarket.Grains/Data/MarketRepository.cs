@@ -1251,6 +1251,10 @@ public sealed class MarketRepository(
     /// </summary>
     public async Task<RaidSessionDto> StartRaidAsync(Guid playerId, RaidZone zone)
     {
+        // JsonStringEnumConverter는 기본적으로 범위 밖 정수({"zone":99})도 바인딩하므로 값을 검증한다(F-2).
+        if (!Enum.IsDefined(zone))
+            throw new DomainException(ErrorCode.ValidationError, "알 수 없는 출격 존입니다(Low/Med/High).");
+
         await using var db = Open();
         await using var tx = await db.BeginTransactionAsync();
         try

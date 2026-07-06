@@ -596,6 +596,24 @@ public class RaidTests(MarketAppFixture f)
         }
     }
 
+    // F-2: 범위 밖 zone 정수({"zone":99})는 ValidationError로 거부된다(JsonStringEnumConverter가
+    // 기본적으로 정수를 바인딩하므로 서버가 Enum.IsDefined로 방어).
+    [Fact]
+    public async Task Start_raid_rejects_unknown_zone()
+    {
+        var e = await _f.AuthedAs(Echo);
+        await ClearAtRisk(Echo);
+        await ClearEquipment(e);
+        await GrantStack(Echo, 24, 3);
+        await Stash(e);
+        await BringStackToPockets(e, 24, 3, 0);
+
+        var res = await e.PostAsync("/api/raid/start",
+            new StringContent("{\"zone\":99}", System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        Assert.Equal(ErrorCode.ValidationError, (await Api<RaidSessionDto>(res)).Error!.Code);
+    }
+
     // 원자성(best-effort 폴트 인젝션): 정산 도중 실패하면 전량 롤백된다.
     // 주머니 수량과 inventory_stack을 어긋나게(외부 변조) 만들어 StartRaid 스택 가드를 실패시키고,
     // 같은 트랜잭션에서 먼저 INSERT된 raid_session이 롤백되는지(ACTIVE 세션 미생성) 검증한다.

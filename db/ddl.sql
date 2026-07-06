@@ -244,15 +244,16 @@ CREATE TABLE raid_session (
     resolved_at TIMESTAMPTZ,     -- EXTRACTED/DIED 확정 시각(ACTIVE면 NULL)
     deadline_at TIMESTAMPTZ,     -- 출격 마감. now() 초과 후 extract/loot 시 탈출 실패=사망(lazy expiry)
     death_chance_bps INT NOT NULL DEFAULT 0, -- 누적 사망확률(bps). loot마다 상승, extract에서 롤(탈출 성공 판정)
-    zone TEXT NOT NULL DEFAULT 'Med'  -- 출격 존(Low/Med/High). 드롭 rarity 가중치·loot당 사망확률 상승률 결정
+    zone TEXT NOT NULL DEFAULT 'Med' CHECK (zone IN ('Low','Med','High'))  -- 출격 존. 드롭 rarity 가중치·loot당 사망확률 상승률 결정
 );
 -- 플레이어당 ACTIVE 세션 1개 강제(부분 유니크 인덱스). 두 번째 StartRaid는 여기서 충돌.
 CREATE UNIQUE INDEX uq_raid_active ON raid_session(player_id) WHERE status = 'ACTIVE';
 CREATE INDEX idx_raid_session_player ON raid_session(player_id, started_at DESC);
 
 -- 위험(at-risk) 아이템 스냅샷 = "레이드 에스크로". BROUGHT(반입) + LOOTED(레이드 중 획득).
---   유니크 LOOTED는 Extract 시점에야 item_instance로 materialize되므로 instance_id는
---   item_instance를 FK 참조하지 않는다(반입 유니크는 이미 존재하는 인스턴스의 id를 담음).
+--   유니크 LOOTED는 loot(scavenge) 시점에 item_instance(owner=NULL, origin='RAID')로 즉시
+--   materialize되고 Extract 시 소유가 부여된다. instance_id는 item_instance를 FK 참조하지 않는다
+--   (반입 유니크는 이미 존재하는 인스턴스의 id를 담음).
 CREATE TABLE raid_session_item (
     id          BIGSERIAL PRIMARY KEY,
     session_id  UUID NOT NULL REFERENCES raid_session(id),
