@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useCatalogStore } from '@/stores/catalog'
@@ -83,6 +83,30 @@ const broughtItems = computed(() => raid.value?.items.filter((i) => i.source ===
 const lootedItems = computed(() => raid.value?.items.filter((i) => i.source === 'Looted') ?? [])
 const atRiskCount = computed(() => raid.value?.items.reduce((n, i) => n + i.quantity, 0) ?? 0)
 
+// ── 레이드 타이머(카운트다운) + 사망확률 미터 ──────────────────────────────
+// 마감(deadlineAt)까지 남은 시간을 1초 틱으로 표시한다. 0이 되면 다음 extract/loot에서
+// 서버가 탈출 실패=사망으로 정산한다(lazy expiry). 사망확률은 loot마다 상승한다.
+const now = ref(Date.now())
+let ticker: ReturnType<typeof setInterval> | null = null
+
+const deadlineMs = computed(() =>
+  raid.value?.deadlineAt ? new Date(raid.value.deadlineAt).getTime() : null,
+)
+const remainingMs = computed(() =>
+  deadlineMs.value === null ? null : Math.max(0, deadlineMs.value - now.value),
+)
+const expired = computed(() => remainingMs.value !== null && remainingMs.value <= 0)
+const remainingLabel = computed(() => {
+  if (remainingMs.value === null) return '--:--'
+  const s = Math.floor(remainingMs.value / 1000)
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+})
+// 남은 시간이 30초 이하이면 긴박(빨강 강조).
+const timeCritical = computed(() => remainingMs.value !== null && remainingMs.value <= 30_000)
+
+const deathChancePct = computed(() => Math.min(100, (raid.value?.deathChanceBps ?? 0) / 100))
+const survivalPct = computed(() => Math.max(0, 100 - deathChancePct.value))
+
 const lootOptions = computed(() => [...catalog.items].sort((a, b) => a.name.localeCompare(b.name)))
 
 function tplName(id: number): string {
@@ -106,6 +130,11 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  ticker = setInterval(() => (now.value = Date.now()), 1000)
+})
+
+onUnmounted(() => {
+  if (ticker) clearInterval(ticker)
 })
 
 async function onDeploy(): Promise<void> {
@@ -128,7 +157,16 @@ async function onLoot(): Promise<void> {
   if (lootTemplateId.value === null) return
   looting.value = true
   try {
-    raid.value = await raidApi.loot({ templateId: lootTemplateId.value, quantity: lootQty.value })
+    const res = await raidApi.loot({ templateId: lootTemplateId.value, quantity: lootQty.value })
+    // 마감을 넘겨 loot를 시도하면 서버가 탈출 실패=사망으로 정산해 DIED를 돌려준다.
+    if (res.status === 'Died') {
+      outcome.value = res
+      raid.value = null
+      toastError(null, '시간 초과 — 탈출하지 못하고 사망했습니다. 아이템이 소실되었습니다.')
+      await afterResolve()
+      return
+    }
+    raid.value = res
     toastSuccess(`획득 — ${tplName(lootTemplateId.value)} ×${lootQty.value}`)
     lootQty.value = 1
   } catch (err) {
@@ -153,9 +191,14 @@ async function afterResolve(): Promise<void> {
 async function onExtract(): Promise<void> {
   resolving.value = true
   try {
-    outcome.value = await raidApi.extract()
+    // 탈출 시도는 확률(또는 마감 초과)로 사망할 수 있다 — 서버가 EXTRACTED/DIED를 판정해 돌려준다.
+    const res = await raidApi.extract()
+    outcome.value = res
     raid.value = null
-    toastSuccess('탈출 성공 — 장비는 제자리로 복귀, 전리품은 회수되었습니다.')
+    if (res.status === 'Extracted')
+      toastSuccess('탈출 성공 — 장비는 제자리로 복귀, 전리품은 회수되었습니다.')
+    else
+      toastError(null, '탈출 실패 — 사망했습니다. 반입·획득 아이템이 모두 소실되었습니다.')
     await afterResolve()
   } catch (err) {
     if (err instanceof ApiClientError && err.apiError.code === 'RaidNotFound') {
@@ -309,9 +352,21 @@ function goGear(): void {
       <section class="wx-panel manifest-panel">
         <div class="panel-head">
           <span class="wx-section-title">위험 노출 매니페스트 · At Risk</span>
-          <span class="risk-badge mono">{{ atRiskCount }} 점 노출</span>
+          <span class="head-badges">
+            <span
+              class="countdown mono"
+              :class="{ critical: timeCritical, expired }"
+              title="탈출 제한시간 — 초과 시 탈출 실패(사망)"
+            >
+              ⏱ {{ expired ? '시간 초과' : remainingLabel }}
+            </span>
+            <span class="risk-badge mono">{{ atRiskCount }} 점</span>
+          </span>
         </div>
-        <p class="atrisk-warn mono">
+        <p v-if="expired" class="atrisk-warn mono expired-warn">
+          ⏱ 제한시간 초과 — 지금 탈출/획득을 시도하면 <b>실패(사망)</b>하고 아이템이 소실됩니다.
+        </p>
+        <p v-else class="atrisk-warn mono">
           ⚠ 아래 아이템은 전투 지역에 노출되어 있습니다 — 사망 시 전부 소실됩니다.
         </p>
 
@@ -358,6 +413,21 @@ function goGear(): void {
 
         <section class="wx-panel resolve-panel">
           <span class="wx-section-title">레이드 종료 · Resolve</span>
+
+          <!-- 사망확률 미터: 획득할수록 상승 → 탈출 성공률 하락 -->
+          <div class="death-meter">
+            <div class="meter-head mono">
+              <span>탈출 성공률 · Survival</span>
+              <span :class="{ risky: deathChancePct >= 50 }">{{ survivalPct.toFixed(0) }}%</span>
+            </div>
+            <div class="meter-track">
+              <div class="meter-fill" :style="{ width: deathChancePct + '%' }" />
+            </div>
+            <p class="meter-note mono wx-muted">
+              획득할수록 사망확률 상승 — 현재 <b>{{ deathChancePct.toFixed(0) }}%</b> 사망 위험
+            </p>
+          </div>
+
           <el-button
             type="success"
             size="large"
@@ -365,7 +435,7 @@ function goGear(): void {
             :loading="resolving"
             @click="onExtract"
           >
-            탈출 · EXTRACT
+            탈출 · EXTRACT ({{ survivalPct.toFixed(0) }}%)
           </el-button>
           <el-button
             type="danger"
@@ -571,6 +641,72 @@ function goGear(): void {
   border-radius: var(--wx-r-sm);
   padding: 8px 12px;
   margin: 0 0 16px;
+}
+.expired-warn {
+  font-weight: 700;
+  animation: warn-pulse 1s ease-in-out infinite;
+}
+@keyframes warn-pulse {
+  50% {
+    background: rgba(208, 85, 64, 0.2);
+  }
+}
+.head-badges {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+/* 카운트다운 타이머 배지 */
+.countdown {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--wx-fg);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-bg-inset, rgba(255, 255, 255, 0.04));
+  border-radius: 999px;
+  padding: 3px 10px;
+  letter-spacing: 1px;
+}
+.countdown.critical {
+  color: var(--wx-sell);
+  border-color: var(--wx-sell-dim);
+  background: rgba(208, 85, 64, 0.14);
+}
+.countdown.expired {
+  color: #fff;
+  background: var(--wx-sell);
+  border-color: var(--wx-sell);
+}
+/* 사망확률 미터 */
+.death-meter {
+  margin-bottom: 14px;
+}
+.meter-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+.meter-head .risky {
+  color: var(--wx-sell);
+}
+.meter-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--wx-border);
+  overflow: hidden;
+}
+.meter-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--wx-buy, #6fae5f), var(--wx-sell));
+  transition: width 0.3s ease;
+}
+.meter-note {
+  font-size: 11px;
+  margin: 6px 0 0;
 }
 .manifest-group {
   margin-bottom: 18px;
