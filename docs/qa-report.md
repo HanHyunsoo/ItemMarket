@@ -246,6 +246,10 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       트랜잭션화하고 `item_ledger`에 `ADMIN_GRANT`(+qty/+1) 기록(지갑 `AdminAdjust`와 대칭). enum·DDL·
       미러가 광고하던 사유를 실제로 방출해 아이템 원장을 완결화. 회귀 테스트
       `MarketFlowTests.Admin_item_grant_is_recorded_in_item_ledger` 추가. (`MarketRepository.cs`)
+- [x] **A-3/A-4** (후속 QA·Low) 계약 미러/주석 정합 — `web types.ts` `ErrorCode`에 누락 4종
+      (`RateLimited`·`IdempotencyInProgress`·`IdempotencyUnavailable`·`RaidNothingToDeploy`) 추가,
+      `AddLootRequest` 필드(kind 무시·durability·attachments·optional quantity) 정합. `DieAsync` 낡은
+      주석("RAID_LOSS 기록")을 M4 대칭화 반영으로 수정. (`types.ts`, `MarketRepository.cs`)
 - [x] **M4** 사망 시 `item_ledger` 대칭화 — 사망 정산에서 `RaidLoss` insert 제거. 반입분은 출격
       `RaidBrought`(−)로 이미 손실이 회계돼 재차감=이중차감이었고, 전리품은 사전 크레딧이 없어
       `RaidLoss`(−)만 남으면 유령 음수였다. 물리 tombstone(유니크 `owner=NULL,origin=RAID_LOST`)은

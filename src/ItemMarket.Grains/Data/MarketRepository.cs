@@ -1304,7 +1304,8 @@ public sealed class MarketRepository(string connectionString)
 
     /// <summary>
     /// Die(한 트랜잭션): ACTIVE→DIED. 위험 아이템 전량 소실(스택 미복귀 / 유니크 tombstone: owner=NULL,
-    /// origin=RAID_LOST). 스태시(안전)는 무관. RAID_LOSS 기록(손실 회계).
+    /// origin=RAID_LOST). 스태시(안전)는 무관. 소실은 item_ledger에 별도 기록하지 않는다(M4 대칭화 —
+    /// 반입분은 RaidBrought에서 이미 debit, 전리품은 credit이 없음). 손실 감사는 raid_session(DIED)+raid_session_item.
     /// </summary>
     public async Task<RaidSessionDto> DieAsync(Guid playerId)
         => await ResolveRaidAsync(playerId, extracted: false);

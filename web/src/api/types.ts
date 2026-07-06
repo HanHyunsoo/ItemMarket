@@ -32,7 +32,11 @@ export type ErrorCode =
   | 'PlacementInvalid'
   | 'RaidActive'
   | 'RaidNotFound'
+  | 'RaidNothingToDeploy'
   | 'SlotMismatch'
+  | 'RateLimited'
+  | 'IdempotencyInProgress'
+  | 'IdempotencyUnavailable'
 
 // ---- Common envelope ----
 export interface ApiError {
@@ -236,9 +240,14 @@ export interface RaidSessionDto {
   items: RaidSessionItemDto[]
 }
 
+// 전리품 종류는 Kind가 아니라 템플릿의 stackable로 서버가 결정한다(Kind는 무시). 스택이면
+// quantity(1..max_stack), 유니크면 quantity 무시·durability/attachments 선택.
 export interface AddLootRequest {
+  kind?: RaidItemKind
   templateId: number
-  quantity: number
+  quantity?: number
+  durability?: number
+  attachments?: string[]
 }
 
 // A resolved raid (Extracted/Died) for the history/records view. Items carry the
