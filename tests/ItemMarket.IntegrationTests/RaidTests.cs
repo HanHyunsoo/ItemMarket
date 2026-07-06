@@ -275,7 +275,10 @@ public class RaidTests(MarketAppFixture f)
         await ClearEquipment(d);
     }
 
-    // Die = 위험만 소실: 주머니+장착 무기 소실, 스태시(안전) 무관, 손실은 item_ledger에 기록.
+    // Die = 위험만 소실: 주머니+장착 무기 소실, 스태시(안전) 무관.
+    // item_ledger는 세션의 소유량 순변화를 대칭 회계한다(M4): 사망 시 RaidLoss를 남기지 않는다 —
+    // 반입분은 RaidBrought(-)로 이미 손실이 회계됐고(재차감=이중차감), 전리품은 사전 credit이 없어
+    // RaidLoss(-)만 남기면 유령 음수이기 때문. 손실 감사는 raid_session(DIED)+raid_session_item이 보유.
     [Fact]
     public async Task Die_destroys_at_risk_only_and_stash_is_untouched()
     {
@@ -312,13 +315,27 @@ public class RaidTests(MarketAppFixture f)
         var stash = await Stash(d);
         Assert.Contains(stash.Placements, p => p.Kind == StashEntryKind.Stack && p.TemplateId == 21);
 
-        // 손실이 item_ledger(RAID_LOSS)에 회계된다(반입 스택+반입 유니크+획득 스택 = 3건).
         await using var db = new NpgsqlConnection(_f.ConnString);
         await db.OpenAsync();
+
+        // 대칭화(M4): 사망 정산은 RaidLoss 원장을 남기지 않는다.
         var lossCount = await db.ExecuteScalarAsync<long>(
             "SELECT count(*) FROM item_ledger WHERE player_id = @p AND reason = 'RAID_LOSS' AND ref_id = @s",
             new { p = Delta, s = sessionId });
-        Assert.Equal(3, lossCount);
+        Assert.Equal(0, lossCount);
+
+        // 불변식: 이 세션의 ledger delta 합 == 세션이 플레이어 소유량에 준 순변화.
+        //   반입 스택 #12: RaidBrought -7 / 반입 유니크 pistol: RaidBrought -1 / 획득 #94: 무기록(0) → 합 -8.
+        var sessionDelta = await db.ExecuteScalarAsync<long>(
+            "SELECT COALESCE(SUM(delta_qty), 0) FROM item_ledger WHERE player_id = @p AND ref_id = @s",
+            new { p = Delta, s = sessionId });
+        Assert.Equal(-8, sessionDelta);
+
+        // 유령 음수 없음: 전리품(#94)은 소유한 적이 없으므로 원장 행이 아예 없다.
+        var lootRows = await db.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM item_ledger WHERE player_id = @p AND ref_id = @s AND template_id = 94",
+            new { p = Delta, s = sessionId });
+        Assert.Equal(0, lootRows);
     }
 
     // 플레이어당 ACTIVE 레이드는 1개 — 두 번째 StartRaid는 RaidActive(409).

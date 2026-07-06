@@ -1301,19 +1301,20 @@ public sealed class MarketRepository(string connectionString)
                 }
                 else // died: 소실.
                 {
-                    if (kind == StashEntryKind.Stack)
-                    {
-                        // 반입 스택은 StartRaid에서 이미 인벤 차감됨(미복귀 = 소실). 획득 스택은 인벤에 없던 것.
-                        await InsertItemLedgerAsync(db, tx, playerId, kind, templateId, null, -qty, ItemLedgerReason.RaidLoss, sessionId);
-                    }
-                    else
+                    // item_ledger는 소유량 프로버넌스 로그다 — sum(delta_qty) == 실제 소유량이 불변식.
+                    // 사망 시 소유량 변화는 0이므로 RaidLoss를 남기지 않는다(M4, 대칭화):
+                    //   - 반입분: 출격 RaidBrought(-)에서 이미 debit됨. 미복귀=영구 손실이 그 debit으로 이미 표현됨
+                    //     → 재차감하면 이중차감(유령 음수).
+                    //   - 전리품(LOOTED): 인벤에 들어온 적 없어 사전 credit이 없음 → RaidLoss(-)만 남기면 유령 음수.
+                    // "무엇을 잃었나"의 감사는 raid_session(status=DIED)+raid_session_item이 보유한다.
+                    if (kind == StashEntryKind.Instance)
                     {
                         // tombstone: owner=NULL 유지 + origin=RAID_LOST(FK 안전한 소각 — 삭제 대신 표식).
                         await db.ExecuteAsync(
                             "UPDATE item_instance SET owner_player_id = NULL, origin = 'RAID_LOST' WHERE id = @instanceId",
                             new { instanceId }, tx);
-                        await InsertItemLedgerAsync(db, tx, playerId, kind, templateId, instanceId, -1, ItemLedgerReason.RaidLoss, sessionId);
                     }
+                    // 반입 스택은 StartRaid에서 이미 인벤 차감됨(미복귀 = 소실) — 추가 물리/원장 처리 없음.
                 }
             }
 

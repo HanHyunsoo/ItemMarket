@@ -237,9 +237,11 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 > (레이블은 A/B 섹션의 finding id와 대응.)
 
 ### 기능 — 정합성·계약·견고성
-- [ ] **M4** 사망 시 `item_ledger` 대칭화 — 반입분은 사망 때 재차감(`RaidLoss`) 하지 말 것(이미 출격
-      `RaidBrought`에서 debit). 전리품-사망은 사전 크레딧 없이 `RaidLoss`만 남는 유령 음수 처리.
-      (`MarketRepository.cs:1307,1315`)
+- [x] **M4** 사망 시 `item_ledger` 대칭화 — 사망 정산에서 `RaidLoss` insert 제거. 반입분은 출격
+      `RaidBrought`(−)로 이미 손실이 회계돼 재차감=이중차감이었고, 전리품은 사전 크레딧이 없어
+      `RaidLoss`(−)만 남으면 유령 음수였다. 물리 tombstone(유니크 `owner=NULL,origin=RAID_LOST`)은
+      유지, 손실 감사는 `raid_session`(DIED)+`raid_session_item`이 보유. 불변식(세션 `ref_id` ledger
+      합 == 소유량 순변화) 회귀 테스트 추가. (`MarketRepository.cs:1302~`, `RaidTests.cs`)
 - [ ] **M2** 멱등성 — 프로덕션에서 Redis 필수화. 무저장 폴백(`NullIdempotencyStore`)일 땐 `Idempotency-Key`를
       거부하거나 경고 로그. (`Program.cs:76-79`, `IdempotencyStore.cs:84-92`)
 - [ ] **M3** OpenAPI enum — Swashbuckle 스키마 필터로 enum을 `type:string` + 값 목록으로 노출
