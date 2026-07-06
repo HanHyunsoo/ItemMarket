@@ -11,7 +11,14 @@ import RaidItemRow from '@/components/RaidItemRow.vue'
 import { dateTime, shortId } from '@/utils/format'
 import { toastError, toastSuccess } from '@/utils/toast'
 import { ApiClientError } from '@/api/client'
-import type { EquipSlot, EquipmentDto, NestedContainerDto, RaidSessionDto, StashDto } from '@/api/types'
+import type {
+  EquipSlot,
+  EquipmentDto,
+  NestedContainerDto,
+  RaidSessionDto,
+  RaidZone,
+  StashDto,
+} from '@/api/types'
 
 const SLOT_LABEL: Record<EquipSlot, string> = {
   Helmet: 'Helmet · 헬멧',
@@ -41,9 +48,13 @@ const deploying = ref(false)
 const looting = ref(false)
 const resolving = ref(false)
 
-// loot form
-const lootTemplateId = ref<number | null>(null)
-const lootQty = ref(1)
+// 출격 존 선택(리스크/보상 티어). 드롭 등급·loot당 사망확률 상승률을 결정한다.
+const ZONES: { key: RaidZone; label: string; hint: string }[] = [
+  { key: 'Low', label: 'Low · 저위험', hint: '하급 드롭 · 사망확률 완만' },
+  { key: 'Med', label: 'Med · 중위험', hint: '균형 드롭 · 표준 위험' },
+  { key: 'High', label: 'High · 고위험', hint: '상급 드롭 · 사망확률 급상승' },
+]
+const selectedZone = ref<RaidZone>('Med')
 
 // prep | active | outcome — drives which panel shows.
 const mode = computed<'prep' | 'active' | 'outcome'>(() => {
@@ -107,8 +118,6 @@ const timeCritical = computed(() => remainingMs.value !== null && remainingMs.va
 const deathChancePct = computed(() => Math.min(100, (raid.value?.deathChanceBps ?? 0) / 100))
 const survivalPct = computed(() => Math.max(0, 100 - deathChancePct.value))
 
-const lootOptions = computed(() => [...catalog.items].sort((a, b) => a.name.localeCompare(b.name)))
-
 function tplName(id: number): string {
   return catalog.get(id)?.name ?? `#${id}`
 }
@@ -140,8 +149,8 @@ onUnmounted(() => {
 async function onDeploy(): Promise<void> {
   deploying.value = true
   try {
-    raid.value = await raidApi.start()
-    toastSuccess('출격 — 레이드에 진입했습니다.')
+    raid.value = await raidApi.start(selectedZone.value)
+    toastSuccess(`출격 — ${selectedZone.value} 존에 진입했습니다.`)
   } catch (err) {
     // Already deployed elsewhere: sync to the live raid instead of erroring out.
     if (err instanceof ApiClientError && err.apiError.code === 'RaidActive') {
@@ -153,24 +162,24 @@ async function onDeploy(): Promise<void> {
   }
 }
 
-async function onLoot(): Promise<void> {
-  if (lootTemplateId.value === null) return
+// 루팅(scavenge): 서버가 세션 존으로 무엇을·얼마나 드롭할지 결정한다.
+async function onScavenge(): Promise<void> {
   looting.value = true
   try {
-    const res = await raidApi.loot({ templateId: lootTemplateId.value, quantity: lootQty.value })
-    // 마감을 넘겨 loot를 시도하면 서버가 탈출 실패=사망으로 정산해 DIED를 돌려준다.
-    if (res.status === 'Died') {
-      outcome.value = res
+    const res = await raidApi.loot()
+    // 마감을 넘겨 루팅을 시도하면 서버가 탈출 실패=사망으로 정산해 dropped=null, session.status=Died.
+    if (res.session.status === 'Died') {
+      outcome.value = res.session
       raid.value = null
       toastError(null, '시간 초과 — 탈출하지 못하고 사망했습니다. 아이템이 소실되었습니다.')
       await afterResolve()
       return
     }
-    raid.value = res
-    toastSuccess(`획득 — ${tplName(lootTemplateId.value)} ×${lootQty.value}`)
-    lootQty.value = 1
+    raid.value = res.session
+    if (res.dropped)
+      toastSuccess(`획득 — ${tplName(res.dropped.templateId)} ×${res.dropped.quantity}`)
   } catch (err) {
-    toastError(err, 'Loot failed.')
+    toastError(err, 'Scavenge failed.')
   } finally {
     looting.value = false
   }
@@ -335,6 +344,22 @@ function goGear(): void {
             <li>착용 장비만으로도 출격할 수 있습니다 — 주머니가 비어 있어도 무방합니다.</li>
           </ul>
         </div>
+        <div class="zone-select">
+          <span class="wx-section-title">출격 존 · Zone</span>
+          <div class="zone-grid">
+            <button
+              v-for="z in ZONES"
+              :key="z.key"
+              type="button"
+              class="zone-chip mono"
+              :class="{ active: selectedZone === z.key }"
+              @click="selectedZone = z.key"
+            >
+              <span class="zone-name">{{ z.label }}</span>
+              <span class="zone-hint">{{ z.hint }}</span>
+            </button>
+          </div>
+        </div>
         <el-button
           type="primary"
           size="large"
@@ -342,7 +367,7 @@ function goGear(): void {
           :loading="deploying"
           @click="onDeploy"
         >
-          출격 · DEPLOY
+          출격 · DEPLOY ({{ selectedZone }})
         </el-button>
       </aside>
     </div>
@@ -389,26 +414,19 @@ function goGear(): void {
 
       <aside class="side-col">
         <section class="wx-panel loot-panel">
-          <span class="wx-section-title">획득 시뮬 · Loot</span>
-          <div class="loot-form">
-            <el-select
-              v-model="lootTemplateId"
-              filterable
-              placeholder="아이템 선택"
-              class="loot-select"
-            >
-              <el-option v-for="t in lootOptions" :key="t.id" :label="t.name" :value="t.id" />
-            </el-select>
-            <el-input-number v-model="lootQty" :min="1" :max="999" class="loot-qty" />
-            <el-button
-              class="loot-btn"
-              :loading="looting"
-              :disabled="lootTemplateId === null"
-              @click="onLoot"
-            >
-              획득
-            </el-button>
-          </div>
+          <span class="wx-section-title">루팅 · Scavenge</span>
+          <p class="scavenge-note mono wx-muted">
+            서버가 존 등급으로 무엇을·얼마나 드롭할지 결정합니다 — 루팅할수록 사망확률이 오릅니다.
+          </p>
+          <el-button
+            class="scavenge-btn"
+            size="large"
+            :loading="looting"
+            :disabled="expired"
+            @click="onScavenge"
+          >
+            🔍 상자 뒤지기 · SCAVENGE
+          </el-button>
         </section>
 
         <section class="wx-panel resolve-panel">
@@ -615,6 +633,60 @@ function goGear(): void {
   letter-spacing: 2px;
   font-weight: 800;
   height: 52px;
+}
+/* 출격 존 선택 */
+.zone-select {
+  margin: 16px 0;
+}
+.zone-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.zone-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 12px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-r-sm);
+  background: transparent;
+  color: var(--wx-text-dim);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.zone-chip:hover {
+  border-color: var(--wx-fg);
+}
+.zone-chip.active {
+  border-color: var(--wx-accent, #d0a040);
+  background: rgba(208, 160, 64, 0.1);
+  color: var(--wx-fg);
+}
+.zone-name {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+.zone-hint {
+  font-size: 10px;
+  color: var(--wx-text-dim);
+}
+/* 루팅 버튼 */
+.scavenge-note {
+  font-size: 11px;
+  margin: 0 0 10px;
+  line-height: 1.6;
+}
+.scavenge-btn {
+  width: 100%;
+  font-family: var(--wx-font-display);
+  letter-spacing: 1.5px;
+  font-weight: 800;
 }
 .deploy-note {
   font-size: 11px;

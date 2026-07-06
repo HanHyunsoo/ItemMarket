@@ -1,6 +1,5 @@
 import { api } from './client'
 import type {
-  AddLootRequest,
   AdminAdjustWalletRequest,
   AdminForceCancelOrderRequest,
   AdminGrantInstanceRequest,
@@ -18,10 +17,12 @@ import type {
   OrderDto,
   OrderStatus,
   PagedResult,
+  LootResultDto,
   PlaceOrderRequest,
   PlaceOrderResult,
   RaidHistoryEntryDto,
   RaidSessionDto,
+  RaidZone,
   RefreshRequest,
   StashDto,
   TokenResponse,
@@ -74,11 +75,11 @@ export const stashApi = {
 
 // ---- Raid / Extraction ----
 // GET returns the *active* raid or null (resolved raids aren't returned).
-// start/loot/extract/die return the affected RaidSessionDto.
+// start는 존(zone)을 받고, loot(scavenge)는 서버가 드롭을 결정해 LootResultDto를 돌려준다.
 export const raidApi = {
   get: () => api.get<RaidSessionDto | null>('/api/raid'),
-  start: () => api.post<RaidSessionDto>('/api/raid/start'),
-  loot: (body: AddLootRequest) => api.post<RaidSessionDto>('/api/raid/loot', body),
+  start: (zone: RaidZone = 'Med') => api.post<RaidSessionDto>('/api/raid/start', { zone }),
+  loot: () => api.post<LootResultDto>('/api/raid/loot'),
   extract: () => api.post<RaidSessionDto>('/api/raid/extract'),
   die: () => api.post<RaidSessionDto>('/api/raid/die'),
   // Resolved raids (Extracted/Died), newest first, paged.

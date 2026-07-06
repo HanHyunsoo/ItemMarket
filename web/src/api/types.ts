@@ -242,14 +242,18 @@ export interface RaidSessionDto {
   deathChanceBps: number // 누적 사망확률(bps). extract 시 이 확률로 사망 롤. 표시는 min(10000).
 }
 
-// 전리품 종류는 Kind가 아니라 템플릿의 stackable로 서버가 결정한다(Kind는 무시). 스택이면
-// quantity(1..max_stack), 유니크면 quantity 무시·durability/attachments 선택.
-export interface AddLootRequest {
-  kind?: RaidItemKind
-  templateId: number
-  quantity?: number
-  durability?: number
-  attachments?: string[]
+// 출격 존(리스크/보상 티어). 드롭 rarity 가중치와 loot당 사망확률 상승률을 함께 결정한다.
+export type RaidZone = 'Low' | 'Med' | 'High'
+
+export interface StartRaidRequest {
+  zone: RaidZone
+}
+
+// 루팅 결과: 서버가 세션 존의 rarity 가중치로 무엇을·얼마나 드롭할지 결정한다. 이번 획득(dropped)과
+// 갱신 세션(session)을 함께 받는다. 마감 초과로 루팅하면 dropped=null, session.status=Died.
+export interface LootResultDto {
+  dropped: RaidSessionItemDto | null
+  session: RaidSessionDto
 }
 
 // A resolved raid (Extracted/Died) for the history/records view. Items carry the
