@@ -319,4 +319,6 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       소지품, 그리드 창고=Gear·장비). (`AppHeader.vue`, `InventoryView.vue`)
 - [x] **#9** 출격 매니페스트 at-risk 캡가치 — "N점"(수량 합 오도)을 사망 시 잃는 총 캡 가치(기준가×수량)로
       교체. (`RaidView.vue`)
-- [ ] **#8** 희귀 전리품 추격 + 리더보드(경제에 판돈 생긴 뒤). `[중]`
+- [x] **#8** 리더보드 — 최다 캡 + 최다 생환(탈출) 순위. 경제에 판돈이 생긴 뒤(#3·#5)의 사회적 목표.
+      `GET /api/leaderboard`(집계) + `LeaderboardView`(메달 순위). (`MarketRepository.GetLeaderboardAsync`,
+      `LeaderboardView.vue`) — 희귀 전리품 추격은 향후.

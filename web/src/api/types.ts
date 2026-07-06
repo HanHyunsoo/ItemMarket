@@ -249,6 +249,17 @@ export interface StashUpgradeResultDto {
   balance: number
 }
 
+// 리더보드 한 줄과 스냅샷(최다 캡 / 최다 생환).
+export interface LeaderEntryDto {
+  playerId: string
+  displayName: string
+  value: number
+}
+export interface LeaderboardDto {
+  topCaps: LeaderEntryDto[]
+  topExtractions: LeaderEntryDto[]
+}
+
 // 출격 존(리스크/보상 티어). 드롭 rarity 가중치와 loot당 사망확률 상승률을 함께 결정한다.
 export type RaidZone = 'Low' | 'Med' | 'High'
 

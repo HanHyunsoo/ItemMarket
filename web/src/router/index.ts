@@ -40,6 +40,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/RaidHistoryView.vue'),
   },
   {
+    path: '/leaderboard',
+    name: 'leaderboard',
+    component: () => import('@/views/LeaderboardView.vue'),
+  },
+  {
     path: '/wallet',
     name: 'wallet',
     component: () => import('@/views/WalletView.vue'),

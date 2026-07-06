@@ -17,6 +17,7 @@ import type {
   OrderDto,
   OrderStatus,
   PagedResult,
+  LeaderboardDto,
   LootResultDto,
   MarketTickerDto,
   PlaceOrderRequest,
@@ -96,6 +97,10 @@ export const marketApi = {
   book: (templateId: number) => api.get<OrderBookSnapshotDto>(`/api/market/${templateId}/book`),
   trades: (templateId: number, page: number, size: number) =>
     api.get<PagedResult<TradeDto>>(`/api/market/${templateId}/trades`, { page, size }),
+}
+
+export const leaderboardApi = {
+  get: () => api.get<LeaderboardDto>('/api/leaderboard'),
 }
 
 export const ordersApi = {

@@ -27,6 +27,7 @@ const navItems = computed(() => {
     { name: 'gear', label: 'Gear · 장비' },
     { name: 'raid', label: 'Raid · 출격' },
     { name: 'records', label: 'Records · 기록' },
+    { name: 'leaderboard', label: 'Ranks · 순위' },
     { name: 'wallet', label: 'Wallet · 지갑' },
     { name: 'orders', label: 'Orders · 주문' },
   ]
