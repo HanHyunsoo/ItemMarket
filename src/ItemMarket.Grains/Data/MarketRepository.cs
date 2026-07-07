@@ -51,11 +51,14 @@ public sealed class MarketRepository(
     // rarity 순서 고정. 존별 가중치[COMMON,UNCOMMON,RARE,EPIC,LEGENDARY] + loot당 사망확률 상승률.
     // 고위험 존일수록 좋은 등급이 잘 나오지만 사망확률이 빠르게 오른다(리스크/보상, #1 연동).
     private static readonly string[] Rarities = ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"];
-    private static readonly Dictionary<RaidZone, (int[] Weights, int DeathIncBps)> ZoneConfig = new()
+    // 존별: (rarity 가중치, loot당 사망확률 상승 bps, 기본 사망확률 floor bps).
+    // BaseDeathBps는 출격 시점의 death_chance_bps 초깃값 — 루팅 0이어도 존 진입만으로 사망 위험이 생겨
+    // "값비싼 장비를 걸고 나갈까"라는 반입 판돈이 실재하게 된다(반입 리스크 상시화).
+    private static readonly Dictionary<RaidZone, (int[] Weights, int DeathIncBps, int BaseDeathBps)> ZoneConfig = new()
     {
-        [RaidZone.Low] = ([55, 30, 12, 3, 0], 800),
-        [RaidZone.Med] = ([35, 32, 22, 9, 2], 1200),
-        [RaidZone.High] = ([15, 30, 35, 15, 5], 2000),
+        [RaidZone.Low] = ([55, 30, 12, 3, 0], 800, 300),
+        [RaidZone.Med] = ([35, 32, 22, 9, 2], 1200, 600),
+        [RaidZone.High] = ([15, 30, 35, 15, 5], 2000, 1200),
     };
 
     /// <summary>존별 출격 수수료(캡 싱크). 매 출격마다 소각돼 저욕심 1-루팅 그라인딩을 억제하고
@@ -70,9 +73,9 @@ public sealed class MarketRepository(
     /// <summary>존 메타(출격 화면용): 존별 수수료 + loot당 사망확률 상승률. 프론트가 배당을 표시한다.</summary>
     public IReadOnlyList<ZoneInfoDto> GetZones() =>
     [
-        new(RaidZone.Low, EntryFee(RaidZone.Low), ZoneConfig[RaidZone.Low].DeathIncBps),
-        new(RaidZone.Med, EntryFee(RaidZone.Med), ZoneConfig[RaidZone.Med].DeathIncBps),
-        new(RaidZone.High, EntryFee(RaidZone.High), ZoneConfig[RaidZone.High].DeathIncBps),
+        new(RaidZone.Low, EntryFee(RaidZone.Low), ZoneConfig[RaidZone.Low].DeathIncBps, ZoneConfig[RaidZone.Low].BaseDeathBps),
+        new(RaidZone.Med, EntryFee(RaidZone.Med), ZoneConfig[RaidZone.Med].DeathIncBps, ZoneConfig[RaidZone.Med].BaseDeathBps),
+        new(RaidZone.High, EntryFee(RaidZone.High), ZoneConfig[RaidZone.High].DeathIncBps, ZoneConfig[RaidZone.High].BaseDeathBps),
     ];
 
     /// <summary>존 가중치로 rarity 하나를 뽑는다(Random.Shared). weight=0인 등급은 뽑히지 않는다.</summary>
@@ -1349,13 +1352,14 @@ public sealed class MarketRepository(
                     "반입할 아이템이 없습니다. 장비를 착용하거나 주머니에 물건을 채운 뒤 출격하세요.");
 
             // 3) 세션 생성. 출격 마감(deadline)을 now() + 제한시간으로 설정 — 초과 후 extract/loot 시
-            //    탈출 실패=사망으로 정산한다(lazy expiry). death_chance_bps는 0에서 시작해 loot마다 상승.
-            //    zone은 드롭 등급 가중치·loot당 사망확률 상승률을 결정한다.
+            //    탈출 실패=사망으로 정산한다(lazy expiry). death_chance_bps는 존 기본 floor에서 시작해
+            //    (반입 리스크 상시화 — 0루팅 즉시 탈출도 무위험이 아님) loot마다 상승한다.
             var sessionId = Guid.NewGuid();
             await db.ExecuteAsync(
-                @"INSERT INTO raid_session(id, player_id, status, deadline_at, zone)
-                  VALUES (@sessionId, @playerId, 'ACTIVE', now() + make_interval(secs => @dur), @zone)",
-                new { sessionId, playerId, dur = raidDurationSeconds, zone = zone.ToString() }, tx);
+                @"INSERT INTO raid_session(id, player_id, status, deadline_at, zone, death_chance_bps)
+                  VALUES (@sessionId, @playerId, 'ACTIVE', now() + make_interval(secs => @dur), @zone, @baseDeath)",
+                new { sessionId, playerId, dur = raidDurationSeconds, zone = zone.ToString(),
+                      baseDeath = ZoneConfig[zone].BaseDeathBps }, tx);
 
             // 4) 스택 반입: inventory_stack 차감(= 매도 에스크로 이동) + 스냅샷 + 원장 + 해당 배치 제거.
             foreach (var s in stackItems)
@@ -1465,7 +1469,7 @@ public sealed class MarketRepository(
             if (sess is null)
                 throw new DomainException(ErrorCode.RaidNotFound, "진행 중인 레이드가 없습니다.");
             Guid sessionId = (Guid)sess.id;
-            var (weights, deathInc) = ZoneConfig[ParseZone((string)sess.zone)];
+            var (weights, deathInc, _) = ZoneConfig[ParseZone((string)sess.zone)];
 
             // 존 가중치로 rarity 롤 → 그 rarity의 템플릿 중 랜덤 1종(무한생성 대신 서버 권위 드롭).
             var rarity = RollRarity(weights);

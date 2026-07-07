@@ -509,7 +509,7 @@ public class RaidTests(MarketAppFixture f)
         await BringStackToPockets(e, 24, 3, 0);
         var started = await Api<RaidSessionDto>(await Start(e));
         Assert.True(started.Success);
-        Assert.Equal(0, started.Data!.DeathChanceBps);       // 출격 시 0
+        Assert.True(started.Data!.DeathChanceBps > 0);       // 출격 시 존 기본 floor(반입 리스크 상시화)
         Assert.NotNull(started.Data.DeadlineAt);              // 마감 존재
 
         // death_chance_bps=10000(100%)으로 조작 → extract 확정 사망(at-risk 소실).
@@ -539,7 +539,8 @@ public class RaidTests(MarketAppFixture f)
         await BringStackToPockets(e, 24, 4, 0);
         (await Start(e)).EnsureSuccessStatusCode();
 
-        var ex = await Api<RaidSessionDto>(await Extract(e));   // chance=0(fixture) → 확정 생존
+        await ResetDeathChance(Echo); // 존 기본 floor를 0으로 덮어 확정 생존 검증(보존 불변식이 목적)
+        var ex = await Api<RaidSessionDto>(await Extract(e));   // chance=0 → 확정 생존
         Assert.Equal(RaidStatus.Extracted, ex.Data!.Status);
         Assert.Equal(before, await StackQty(e, 24));           // 반입 스택 전량 귀속(보존)
     }
@@ -692,6 +693,8 @@ public class RaidTests(MarketAppFixture f)
         var high = zones.Data.Single(z => z.Zone == RaidZone.High);
         Assert.True(high.EntryFee > low.EntryFee);                      // 고위험=높은 진입 장벽
         Assert.True(high.DeathChancePerLootBps > low.DeathChancePerLootBps);
+        Assert.True(low.BaseDeathBps > 0);                             // 반입 리스크 상시화 — floor>0
+        Assert.True(high.BaseDeathBps > low.BaseDeathBps);             // 고위험 존일수록 기본 위험도 큼
     }
 
     // 원자성(best-effort 폴트 인젝션): 정산 도중 실패하면 전량 롤백된다.
