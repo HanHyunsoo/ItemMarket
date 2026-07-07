@@ -310,12 +310,12 @@ async function recordRaid(browser) {
 }
 
 // ---------------------------------------------------------------------------
-function toGif(webm, outName, { fps = 13, width = 950, ss = '0', t } = {}) {
+function toGif(webm, outName, { fps = 8, width = 680, ss = '0', t, colors = 128 } = {}) {
   const out = resolve(OUT, outName)
   const palette = join(VIDEO_DIR, outName.replace('.gif', '.png'))
   const trim = ['-ss', ss, ...(t ? ['-t', String(t)] : [])]
   const vf = `fps=${fps},scale=${width}:-1:flags=lanczos`
-  const p1 = spawnSync('ffmpeg', ['-y', ...trim, '-i', webm, '-vf', `${vf},palettegen=stats_mode=diff`, palette], { stdio: 'inherit' })
+  const p1 = spawnSync('ffmpeg', ['-y', ...trim, '-i', webm, '-vf', `${vf},palettegen=max_colors=${colors}:stats_mode=diff`, palette], { stdio: 'inherit' })
   if (p1.status !== 0) throw new Error('palettegen failed')
   const p2 = spawnSync(
     'ffmpeg',
@@ -323,6 +323,9 @@ function toGif(webm, outName, { fps = 13, width = 950, ss = '0', t } = {}) {
     { stdio: 'inherit' },
   )
   if (p2.status !== 0) throw new Error('paletteuse failed')
+  // Optional lossy post-pass — shrinks README GIFs ~2-3×. Skipped if gifsicle is absent.
+  const gs = spawnSync('gifsicle', ['-O3', '--lossy=80', '--colors', String(colors), out, '-o', out], { stdio: 'inherit' })
+  if (gs.error) console.log('  (gifsicle not found — skipped lossy pass; install for smaller GIFs)')
   const size = spawnSync('du', ['-h', out]).stdout?.toString().split('\t')[0] ?? '?'
   console.log(`  -> ${out} (${size})`)
   return out
@@ -339,11 +342,12 @@ const run = async () => {
   const raidWebm = await recordRaid(browser)
   await browser.close()
 
-  console.log('converting → GIF (ffmpeg two-pass palette) …')
-  // Trim the sign-in/navigation dead time at the head of each clip.
-  toGif(tradeWebm, 'demo-trade.gif', { fps: 13, width: 950, ss: '3.2' })
-  toGif(gridWebm, 'demo-grid.gif', { fps: 13, width: 950, ss: '3.2' })
-  toGif(raidWebm, 'demo-raid.gif', { fps: 13, width: 950, ss: '3.2' })
+  console.log('converting → GIF (ffmpeg two-pass palette + gifsicle lossy) …')
+  // Trim the sign-in/navigation dead time at the head (ss) and cap length (t) to keep
+  // README GIFs small. trade is snappier (fps 10); grid/raid ride at fps 8 / 680px.
+  toGif(tradeWebm, 'demo-trade.gif', { fps: 10, width: 760, ss: '3.2', t: 7 })
+  toGif(gridWebm, 'demo-grid.gif', { fps: 8, width: 680, ss: '3.2', t: 8 })
+  toGif(raidWebm, 'demo-raid.gif', { fps: 8, width: 680, ss: '3.2', t: 12 })
   console.log('done. raw webm left in', VIDEO_DIR, '(not committed)')
 }
 
