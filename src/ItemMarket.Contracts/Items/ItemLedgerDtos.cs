@@ -12,7 +12,8 @@ public enum ItemLedgerReason
     RaidExtract,   // 반입 아이템 생존 회수(+)
     RaidLoot,      // 전리품 materialize(+)
     RaidLoss,      // 위험 아이템 소실(사망, -)
-    AdminGrant     // 운영 지급(+)
+    AdminGrant,    // 운영 지급(+)
+    VendorSell     // NPC 벤더 매입으로 소진(-)
 }
 
 /// <summary>

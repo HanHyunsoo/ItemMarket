@@ -1007,6 +1007,90 @@ public sealed class MarketRepository(
     /// <summary>벤더 참고가 스프레드(bps). 매수=base×(1-s), 매도=base×(1+s). 참고 표시용(실거래 아님).</summary>
     private const int VendorSpreadBps = 1500;
 
+    /// <summary>NPC 벤더 매입가(캡 faucet) = base_value × (1 - 스프레드), 최소 1. 플레이어 시장가보다 낮은
+    /// 최후 유동성 창구다. tickers의 vendor_bid와 동일 공식.</summary>
+    private static long VendorBid(long baseValue) =>
+        Math.Max(1, (long)Math.Floor(baseValue * (10000.0 - VendorSpreadBps) / 10000.0));
+
+    /// <summary>
+    /// NPC 벤더 매입(한 트랜잭션): 보유 아이템을 벤더가(VendorBid)로 즉시 판매해 캡을 발행한다(faucet).
+    /// 스택은 inventory_stack 차감, 유니크는 owner=NULL·origin=VENDOR_SOLD로 소각(FK 안전 tombstone).
+    /// 지갑에 대금을 넣고 wallet_ledger(VENDOR_SELL,+)·item_ledger(VendorSell,-)로 회계한다.
+    /// </summary>
+    public async Task<VendorSellResultDto> VendorSellAsync(Guid playerId, VendorSellRequest req)
+    {
+        await using var db = Open();
+        var isStack = req.Kind == StashEntryKind.Stack;
+        await using var tx = await db.BeginTransactionAsync();
+        try
+        {
+            long unitPrice, proceeds;
+            int templateId;
+
+            if (isStack)
+            {
+                if (req.TemplateId is not { } tid)
+                    throw new DomainException(ErrorCode.ValidationError, "스택 판매에는 TemplateId가 필요합니다.");
+                var qty = req.Quantity ?? 0;
+                if (qty < 1)
+                    throw new DomainException(ErrorCode.ValidationError, "판매 수량은 1 이상이어야 합니다.");
+                templateId = tid;
+                var have = await db.ExecuteScalarAsync<int?>(
+                    "SELECT quantity FROM inventory_stack WHERE player_id = @playerId AND template_id = @tid FOR UPDATE",
+                    new { playerId, tid }, tx);
+                if (have is null || have < qty)
+                    throw new DomainException(ErrorCode.InsufficientQuantity, "판매 수량이 보유량을 초과합니다.");
+                var baseValue = await db.ExecuteScalarAsync<long>(
+                    "SELECT base_value FROM item_template WHERE id = @tid", new { tid }, tx);
+                unitPrice = VendorBid(baseValue);
+                proceeds = unitPrice * qty;
+                await db.ExecuteAsync(
+                    "UPDATE inventory_stack SET quantity = quantity - @qty WHERE player_id = @playerId AND template_id = @tid",
+                    new { qty, playerId, tid }, tx);
+                await InsertItemLedgerAsync(db, tx, playerId, StashEntryKind.Stack, templateId, null, -qty, ItemLedgerReason.VendorSell, null);
+            }
+            else
+            {
+                if (req.InstanceId is not { } iid)
+                    throw new DomainException(ErrorCode.ValidationError, "유니크 판매에는 InstanceId가 필요합니다.");
+                var inst = await db.QuerySingleOrDefaultAsync(
+                    "SELECT owner_player_id, template_id FROM item_instance WHERE id = @iid FOR UPDATE",
+                    new { iid }, tx);
+                if (inst is null)
+                    throw new DomainException(ErrorCode.InstanceNotFound, "인스턴스를 찾을 수 없습니다.");
+                if ((Guid?)inst.owner_player_id != playerId)
+                    throw new DomainException(ErrorCode.InstanceNotOwned, "소유하지 않은 인스턴스입니다.");
+                templateId = (int)inst.template_id;
+                var baseValue = await db.ExecuteScalarAsync<long>(
+                    "SELECT base_value FROM item_template WHERE id = @templateId", new { templateId }, tx);
+                unitPrice = VendorBid(baseValue);
+                proceeds = unitPrice;
+                // 소각: owner=NULL + origin=VENDOR_SOLD(FK 안전 tombstone) + 배치 제거.
+                await db.ExecuteAsync(
+                    "UPDATE item_instance SET owner_player_id = NULL, origin = 'VENDOR_SOLD' WHERE id = @iid",
+                    new { iid }, tx);
+                await db.ExecuteAsync(
+                    "DELETE FROM stash_placement WHERE player_id = @playerId AND kind = 'INSTANCE' AND instance_id = @iid",
+                    new { playerId, iid }, tx);
+                await InsertItemLedgerAsync(db, tx, playerId, StashEntryKind.Instance, templateId, iid, -1, ItemLedgerReason.VendorSell, null);
+            }
+
+            // 캡 발행(faucet): 지갑에 대금 지급 + wallet_ledger(VENDOR_SELL,+).
+            var after = await db.ExecuteScalarAsync<long>(
+                "UPDATE wallet SET balance = balance + @proceeds WHERE player_id = @playerId RETURNING balance",
+                new { proceeds, playerId }, tx);
+            await InsertLedgerAsync(db, tx, playerId, proceeds, after, WalletLedgerReason.VendorSell, null);
+
+            await tx.CommitAsync();
+            return new VendorSellResultDto(unitPrice, proceeds, after);
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
     // ======================================================================
     //  취소(에스크로 환불) — 한 트랜잭션
     // ======================================================================

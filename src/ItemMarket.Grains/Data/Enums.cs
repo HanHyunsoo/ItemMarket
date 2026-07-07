@@ -47,6 +47,7 @@ public static class Enums
         WalletLedgerReason.AdminAdjust => "ADMIN_ADJUST",
         WalletLedgerReason.StashUpgrade => "STASH_UPGRADE",
         WalletLedgerReason.RaidEntryFee => "RAID_ENTRY_FEE",
+        WalletLedgerReason.VendorSell => "VENDOR_SELL",
         _ => "ADMIN_ADJUST"
     };
 
@@ -60,6 +61,7 @@ public static class Enums
         "ADMIN_ADJUST" => WalletLedgerReason.AdminAdjust,
         "STASH_UPGRADE" => WalletLedgerReason.StashUpgrade,
         "RAID_ENTRY_FEE" => WalletLedgerReason.RaidEntryFee,
+        "VENDOR_SELL" => WalletLedgerReason.VendorSell,
         _ => WalletLedgerReason.AdminAdjust
     };
 
@@ -157,6 +159,7 @@ public static class Enums
         ItemLedgerReason.RaidLoot => "RAID_LOOT",
         ItemLedgerReason.RaidLoss => "RAID_LOSS",
         ItemLedgerReason.AdminGrant => "ADMIN_GRANT",
+        ItemLedgerReason.VendorSell => "VENDOR_SELL",
         _ => "ADMIN_GRANT"
     };
 
@@ -167,6 +170,7 @@ public static class Enums
         "RAID_LOOT" => ItemLedgerReason.RaidLoot,
         "RAID_LOSS" => ItemLedgerReason.RaidLoss,
         "ADMIN_GRANT" => ItemLedgerReason.AdminGrant,
+        "VENDOR_SELL" => ItemLedgerReason.VendorSell,
         _ => ItemLedgerReason.AdminGrant
     };
 }

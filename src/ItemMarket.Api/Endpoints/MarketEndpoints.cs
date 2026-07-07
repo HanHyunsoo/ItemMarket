@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using ItemMarket.Contracts.Trades;
 using ItemMarket.Grains.Abstractions;
 using ItemMarket.Grains.Data;
 using static ItemMarket.Api.Infrastructure.ApiResults;
@@ -19,6 +21,10 @@ public static class MarketEndpoints
         // 리더보드: 최다 캡 + 최다 생환(탈출) 상위 순위.
         api.MapGet("/leaderboard", (MarketRepository repo) => Exec(() => repo.GetLeaderboardAsync()))
             .WithTags("Leaderboard");
+
+        // NPC 벤더 매입: 보유 아이템을 벤더가(base_value 스프레드)로 즉시 판매(캡 faucet).
+        api.MapPost("/market/vendor/sell", (VendorSellRequest req, ClaimsPrincipal u, MarketRepository repo) =>
+            Exec(() => repo.VendorSellAsync(CurrentPlayer(u), req)));
 
         api.MapGet("/market/{templateId:int}/book", (int templateId, IGrainFactory gf) =>
             Exec(() => gf.GetGrain<IOrderBookGrain>(templateId).GetSnapshot()));

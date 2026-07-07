@@ -31,3 +31,13 @@ public sealed record MarketTickerDto(
     int OpenOrders,
     long VendorBid,
     long VendorAsk);
+
+/// <summary>NPC 벤더 매입 요청. 스택이면 TemplateId+Quantity, 유니크면 InstanceId.</summary>
+public sealed record VendorSellRequest(
+    ItemMarket.Contracts.Stash.StashEntryKind Kind,
+    int? TemplateId,
+    int? Quantity,
+    Guid? InstanceId);
+
+/// <summary>벤더 매입 결과: 개당 매입가, 지급 총액, 갱신 잔액.</summary>
+public sealed record VendorSellResultDto(long UnitPrice, long Proceeds, long Balance);

@@ -5,6 +5,7 @@ using ItemMarket.Contracts.Common;
 using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Leaderboard;
 using ItemMarket.Contracts.Orders;
+using ItemMarket.Contracts.Stash;
 using ItemMarket.Contracts.Trades;
 using ItemMarket.Contracts.Wallet;
 using ItemMarket.Grains.Data;
@@ -13,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Xunit;
 using static ItemMarket.IntegrationTests.MarketAppFixture;
+using ErrorCode = ItemMarket.Contracts.Common.ErrorCode; // Orleans.ErrorCode와 모호성 방지
 
 namespace ItemMarket.IntegrationTests;
 
@@ -283,5 +285,63 @@ public class MarketFlowTests(MarketAppFixture f)
         var ex = lb.Data.TopExtractions;
         for (var i = 1; i < ex.Count; i++)
             Assert.True(ex[i - 1].Value >= ex[i].Value, "TopExtractions not sorted descending");
+    }
+
+    // 캡 faucet: 벤더 매입으로 스택을 팔면 인벤 차감·지갑 증가(벤더가 = base×0.85)·wallet_ledger(VENDOR_SELL).
+    [Fact]
+    public async Task Vendor_sell_stack_credits_caps_and_removes_items()
+    {
+        var admin = await _f.AuthedAs(Charlie);
+        var p = await _f.AuthedAs(Bravo);
+        const int tid = 95; // 7.62mm 탄약(base_value 있음)
+
+        (await admin.PostAsJsonAsync("/api/admin/grant/stack", new AdminGrantStackRequest(Bravo, tid, 20), Json))
+            .EnsureSuccessStatusCode();
+        var qty0 = await StackQty(p, tid);
+        var bal0 = await Balance(p);
+
+        var res = await Api<VendorSellResultDto>(await p.PostAsJsonAsync(
+            "/api/market/vendor/sell", new VendorSellRequest(StashEntryKind.Stack, tid, 8, null), Json));
+        Assert.True(res.Success);
+        Assert.True(res.Data!.UnitPrice > 0);
+        Assert.Equal(res.Data.UnitPrice * 8, res.Data.Proceeds);      // 개당 × 수량
+        Assert.Equal(qty0 - 8, await StackQty(p, tid));               // 인벤 8개 차감
+        Assert.Equal(bal0 + res.Data.Proceeds, await Balance(p));     // 대금 지급(캡 발행)
+
+        await using var db = new NpgsqlConnection(_f.ConnString);
+        await db.OpenAsync();
+        var n = await db.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM wallet_ledger WHERE player_id = @p AND reason = 'VENDOR_SELL'", new { p = Bravo });
+        Assert.True(n >= 1);
+    }
+
+    // 벤더가는 base_value 스프레드(< 기준가)이고, 수량 초과 판매는 거부된다.
+    [Fact]
+    public async Task Vendor_sell_price_below_base_and_rejects_oversell()
+    {
+        var admin = await _f.AuthedAs(Charlie);
+        var p = await _f.AuthedAs(Bravo);
+        const int tid = 95;
+        (await admin.PostAsJsonAsync("/api/admin/grant/stack", new AdminGrantStackRequest(Bravo, tid, 3), Json))
+            .EnsureSuccessStatusCode();
+
+        var baseValue = catalog(tid);
+        var res = await Api<VendorSellResultDto>(await p.PostAsJsonAsync(
+            "/api/market/vendor/sell", new VendorSellRequest(StashEntryKind.Stack, tid, 1, null), Json));
+        Assert.True(res.Data!.UnitPrice < baseValue);  // 스프레드로 기준가보다 낮은 최후 창구
+
+        // 보유량 초과 판매 → InsufficientQuantity.
+        var over = await p.PostAsJsonAsync(
+            "/api/market/vendor/sell", new VendorSellRequest(StashEntryKind.Stack, tid, 999999, null), Json);
+        Assert.Equal(HttpStatusCode.BadRequest, over.StatusCode);
+        Assert.Equal(ErrorCode.InsufficientQuantity, (await Api<VendorSellResultDto>(over)).Error!.Code);
+    }
+
+    // 카탈로그에서 base_value 조회(벤더가 검증용).
+    private long catalog(int templateId)
+    {
+        using var db = new NpgsqlConnection(_f.ConnString);
+        db.Open();
+        return db.ExecuteScalar<long>("SELECT base_value FROM item_template WHERE id = @id", new { id = templateId });
     }
 }

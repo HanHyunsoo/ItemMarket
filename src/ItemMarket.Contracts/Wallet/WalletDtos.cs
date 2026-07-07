@@ -13,7 +13,8 @@ public enum WalletLedgerReason
     Fee,            // 거래 수수료 소각(-)
     AdminAdjust,    // 운영 수동 조정(±)
     StashUpgrade,   // 스태시 행 확장 구매(-) — 캡 싱크
-    RaidEntryFee    // 출격 수수료(-) — 존별 캡 싱크
+    RaidEntryFee,   // 출격 수수료(-) — 존별 캡 싱크
+    VendorSell      // NPC 벤더 매입 대금(+) — 캡 faucet
 }
 
 /// <summary>지갑 원장 한 줄(append-only). 모든 병뚜껑 이동을 추적.</summary>
