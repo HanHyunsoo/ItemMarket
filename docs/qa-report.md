@@ -269,6 +269,11 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 - [x] **High 존 EV 리밸런싱** (재검증·상) High가 전 구간 EV 음수로 Med에 지배당하던 문제 — 수수료
       1000→600·기본사망 12%→10%·loot당 20%→15% 완화. EV 재검산: High 최대 +584(≈3루팅) > Med +491(≈4루팅)
       → 지배 역전(짧고 굵게=진짜 고위험 고보상). 드롭 가중치 유지. (`MarketRepository.ZoneConfig`, `appsettings`)
+- [x] **최종 QA fun#4 — High 위험 프리미엄 확대** 역전은 됐으나 프리미엄이 +19%뿐(Med와 사망률 54%↔55%
+      동률·수수료 1.5배·분산 큼)이라 얇았다. **위험 프로파일(floor 1000·inc 1500·수수료 600)은 그대로 두고**
+      드롭 가중치만 COMMON 15→11, EPIC 15→19로 이동(LEGENDARY 5% 유지). 시드 149종 직접 파싱 재검산:
+      Eloot 877→939, High EV* 584→668(≈3루팅) = Med 491 대비 **+19%→+36%**. death@n*=55%·n*=3 불변
+      (위험은 그대로, 보상만 확대). 사다리 Scav 281<Low 385<Med 491<High 668 단조 유지. (`MarketRepository.ZoneConfig`)
 - [x] **만료 성공률 표기** (최종 QA·fun) 마감 초과 시 EXTRACT 버튼이 실제(0%)와 다른 성공률을 보이던 것을
       "탈출 시도 · 실패 확정"으로 교정, 미터도 만료 시 0%. (`RaidView.vue`)
 - [x] **F-2** (최종 QA·Low) 존 값 검증 — `StartRaidAsync`가 `Enum.IsDefined`로 범위 밖 zone 정수를
