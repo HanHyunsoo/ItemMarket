@@ -68,7 +68,7 @@
 | POST | `/api/equipment/unequip` | `UnequipRequest` | `EquipmentDto` (해제 후 스냅샷) |
 | GET | `/api/market/tickers` | - | `MarketTickerDto[]` (전 종목 시세 요약: 최우선 매수/매도 호가·최근 체결가/시각·활성 주문 수 + 벤더 참고가(`vendorBid`/`vendorAsk` = base_value±스프레드). 마켓 카드 목록용) |
 | POST | `/api/market/vendor/sell` | `VendorSellRequest` | `VendorSellResultDto` (보유 아이템을 벤더가(`vendorBid`)로 즉시 판매 — 캡 발행(faucet). 스택 수량 차감/유니크 소각. 수량 초과 `InsufficientQuantity`) |
-| GET | `/api/leaderboard` | - | `LeaderboardDto` (최다 순자산(지갑+보유 아이템 기준가) + 최다 생환(탈출) 상위 순위) |
+| GET | `/api/leaderboard` | - | `LeaderboardDto` (최다 순자산(지갑+보유 아이템 기준가) + 최다 생환(탈출) 상위 순위 + `me`: 호출자 본인 순위·전체 인원. 생환 0회면 `me.extractionsRank`=null) |
 | GET | `/api/market/{templateId}/book` | - | `OrderBookSnapshotDto` (호가창) |
 | GET | `/api/market/{templateId}/trades?page=&size=` | - | `PagedResult<TradeDto>` (체결 내역) |
 | POST | `/api/orders` | `PlaceOrderRequest` | `PlaceOrderResult` (잔여 주문 + 즉시 체결분) |

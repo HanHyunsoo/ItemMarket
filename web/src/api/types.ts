@@ -255,9 +255,19 @@ export interface LeaderEntryDto {
   displayName: string
   value: number
 }
+// 호출자 본인의 순위(Top-N 밖이어도 표시). 생환 기록이 없으면 extractionsRank는 null.
+export interface LeaderMeDto {
+  playerId: string
+  netWorth: number
+  netWorthRank: number
+  extractions: number
+  extractionsRank: number | null
+  totalPlayers: number
+}
 export interface LeaderboardDto {
   topNetWorth: LeaderEntryDto[]
   topExtractions: LeaderEntryDto[]
+  me: LeaderMeDto
 }
 
 // 출격 존(리스크/보상 티어). Scav는 무료 재기 티어. 드롭 rarity 가중치·loot당 사망확률·수수료를 결정.

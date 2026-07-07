@@ -369,3 +369,8 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 - [x] **#8** 리더보드 — 최다 캡 + 최다 생환(탈출) 순위. 경제에 판돈이 생긴 뒤(#3·#5)의 사회적 목표.
       `GET /api/leaderboard`(집계) + `LeaderboardView`(메달 순위). (`MarketRepository.GetLeaderboardAsync`,
       `LeaderboardView.vue`) — 희귀 전리품 추격은 향후.
+- [x] **최종 QA fun#5 — 리더보드 "내 순위"** Top-N만 반환해 상위권 밖 플레이어는 위치 피드백이 없어
+      동기부여가 소수에게만 작동했다. 응답에 호출자 본인 순위(`me`: 순자산·생환 순위 + 전체 인원)를 추가.
+      Top-N 밖이어도 "N위 / 전체 M명" 배너로 표시하고, Top-N 안이면 본인 행을 강조. 생환 0회면 순위 미정.
+      순위 계산은 "나보다 앞선 수 + 1"(Top-N과 동일 정렬 기준). (`GetLeaderboardAsync`, `LeaderboardView.vue`,
+      회귀 테스트 2종)
