@@ -28,18 +28,18 @@ function medal(i: number): string {
 <template>
   <div v-loading="loading">
     <h1 class="wx-page-title">Leaderboard · 순위</h1>
-    <p class="wx-page-sub">황무지에서 가장 잘 나가는 생존자들 — 최다 캡과 최다 생환</p>
+    <p class="wx-page-sub">황무지에서 가장 잘 나가는 생존자들 — 최다 자산과 최다 생환</p>
 
     <div class="boards">
       <section class="wx-panel">
-        <h3 class="wx-section-title">💰 최다 캡 · Top Caps</h3>
+        <h3 class="wx-section-title">💰 최다 자산 · Top Net Worth</h3>
         <ol class="board-list">
-          <li v-for="(e, i) in board?.topCaps ?? []" :key="e.playerId">
+          <li v-for="(e, i) in board?.topNetWorth ?? []" :key="e.playerId">
             <span class="rank mono">{{ medal(i) }}</span>
             <span class="who">{{ e.displayName }}</span>
             <span class="val mono">{{ caps(e.value) }}</span>
           </li>
-          <li v-if="!(board?.topCaps?.length)" class="empty mono">아직 데이터가 없습니다</li>
+          <li v-if="!(board?.topNetWorth?.length)" class="empty mono">아직 데이터가 없습니다</li>
         </ol>
       </section>
 

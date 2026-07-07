@@ -256,7 +256,7 @@ export interface LeaderEntryDto {
   value: number
 }
 export interface LeaderboardDto {
-  topCaps: LeaderEntryDto[]
+  topNetWorth: LeaderEntryDto[]
   topExtractions: LeaderEntryDto[]
 }
 
