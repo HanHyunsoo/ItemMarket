@@ -722,7 +722,7 @@ public sealed class MarketRepository(
             @"SELECT pe.slot, pe.instance_id, ii.template_id
               FROM player_equipment pe
               JOIN item_instance ii ON ii.id = pe.instance_id
-              WHERE pe.player_id = @playerId
+              WHERE pe.player_id = @playerId AND ii.owner_player_id = @playerId
               ORDER BY pe.slot",
             new { playerId });
         return rows.Select(r => new EquipmentSlotRow(
@@ -1068,6 +1068,21 @@ public sealed class MarketRepository(
                     throw new DomainException(ErrorCode.InstanceNotFound, "인스턴스를 찾을 수 없습니다.");
                 if ((Guid?)inst.owner_player_id != playerId)
                     throw new DomainException(ErrorCode.InstanceNotOwned, "소유하지 않은 인스턴스입니다.");
+                // 장착 중(player_equipment)이면 거부 — 소각해도 장착 행은 별도 테이블이라 남아
+                // "캡 수령 + 장비 유지(가치 복제)" 후 출격 시 owner=NULL 롤백(소프트락)을 유발한다.
+                // 인형 위 아이템은 먼저 해제 후 창고에서 팔아야 한다.
+                var equipped = await db.ExecuteScalarAsync<int?>(
+                    "SELECT 1 FROM player_equipment WHERE player_id = @playerId AND instance_id = @iid",
+                    new { playerId, iid }, tx);
+                if (equipped is not null)
+                    throw new DomainException(ErrorCode.ValidationError, "장착 중인 아이템은 판매할 수 없습니다. 먼저 해제하세요.");
+                // 내용물이 있는 컨테이너(백팩/리그)를 팔면 중첩 배치가 유령 컨테이너를 가리켜 orphan이 된다.
+                // 먼저 비운 뒤 판매하도록 거부한다.
+                var hasContents = await db.ExecuteScalarAsync<int?>(
+                    "SELECT 1 FROM stash_placement WHERE player_id = @playerId AND container_instance_id = @iid LIMIT 1",
+                    new { playerId, iid }, tx);
+                if (hasContents is not null)
+                    throw new DomainException(ErrorCode.ValidationError, "내용물이 있는 컨테이너는 판매할 수 없습니다. 먼저 비우세요.");
                 templateId = (int)inst.template_id;
                 var baseValue = await db.ExecuteScalarAsync<long>(
                     "SELECT base_value FROM item_template WHERE id = @templateId", new { templateId }, tx);

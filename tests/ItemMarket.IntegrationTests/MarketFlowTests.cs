@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using ItemMarket.Contracts.Admin;
 using ItemMarket.Contracts.Common;
+using ItemMarket.Contracts.Equipment;
 using ItemMarket.Contracts.Items;
 using ItemMarket.Contracts.Leaderboard;
 using ItemMarket.Contracts.Orders;
@@ -335,6 +336,39 @@ public class MarketFlowTests(MarketAppFixture f)
             "/api/market/vendor/sell", new VendorSellRequest(StashEntryKind.Stack, tid, 999999, null), Json);
         Assert.Equal(HttpStatusCode.BadRequest, over.StatusCode);
         Assert.Equal(ErrorCode.InsufficientQuantity, (await Api<VendorSellResultDto>(over)).Error!.Code);
+    }
+
+    // 회귀(QA ★★): 장착 중인 유니크를 벤더 매입하면 거부된다(캡 수령+장비 유지=가치 복제, 이후 출격 소프트락 방지).
+    [Fact]
+    public async Task Vendor_sell_of_equipped_unique_is_rejected_and_keeps_equipment()
+    {
+        var admin = await _f.AuthedAs(Charlie);
+        var p = await _f.AuthedAs(Bravo);
+        const int pistol = 74; // GUN(equip_slot=WEAPON) 유니크
+
+        var g = await Api<ItemInstanceDto>(await admin.PostAsJsonAsync(
+            "/api/admin/grant/instance", new AdminGrantInstanceRequest(Bravo, pistol, 300, null), Json));
+        Assert.True(g.Success);
+        var iid = g.Data!.Id;
+        (await p.PostAsJsonAsync("/api/equipment/equip", new EquipRequest(EquipSlot.Weapon, iid), Json))
+            .EnsureSuccessStatusCode();
+
+        // 장착 상태에서 벤더 매입 시도 → ValidationError(거부).
+        var sell = await p.PostAsJsonAsync(
+            "/api/market/vendor/sell", new VendorSellRequest(StashEntryKind.Instance, null, null, iid), Json);
+        Assert.Equal(HttpStatusCode.BadRequest, sell.StatusCode);
+        Assert.Equal(ErrorCode.ValidationError, (await Api<VendorSellResultDto>(sell)).Error!.Code);
+
+        // 장비는 그대로 유지(소각·복제 없음)되고 인스턴스 소유도 유지된다.
+        var eq = await Api<EquipmentDto>(await p.GetAsync("/api/equipment"));
+        Assert.Contains(eq.Data!.Slots, s => s.InstanceId == iid);
+
+        // 해제 후에는 정상 판매된다(창고에 있는 아이템은 팔 수 있음).
+        (await p.PostAsJsonAsync("/api/equipment/unequip", new UnequipRequest(EquipSlot.Weapon), Json))
+            .EnsureSuccessStatusCode();
+        var ok = await Api<VendorSellResultDto>(await p.PostAsJsonAsync(
+            "/api/market/vendor/sell", new VendorSellRequest(StashEntryKind.Instance, null, null, iid), Json));
+        Assert.True(ok.Success);
     }
 
     // 카탈로그에서 base_value 조회(벤더가 검증용).
