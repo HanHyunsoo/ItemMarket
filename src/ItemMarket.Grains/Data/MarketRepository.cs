@@ -23,7 +23,8 @@ public sealed class MarketRepository(
     long stashUpgradeStep = 1000,
     long raidEntryFeeLow = 150,
     long raidEntryFeeMed = 400,
-    long raidEntryFeeHigh = 600)
+    long raidEntryFeeHigh = 600,
+    long scavNetWorthCeiling = 1000)
 {
     /// <summary>스태시 확장 단위(행)와 상한(DDL CHECK와 일치).</summary>
     private const int StashRowsPerUpgrade = 6;
@@ -1496,12 +1497,30 @@ public sealed class MarketRepository(
                               OriginSlot: (string?)(string)e.slot, OriginX: (int?)null, OriginY: (int?)null)))
                 .OrderBy(x => x.InstanceId).ToList();
 
-            // 스태시 밖이 전부 비어 있으면(장비도 없고 주머니/컨테이너도 없으면) 출격할 것이 없다.
+            // 스태시 밖이 전부 비어 있으면(장비도 없고 주머니/컨테이너도 없으면) 반입할 것이 없다.
             // 장착 장비만 있어도(주머니가 비어 있어도) instanceItems가 equipment로 채워지므로 여기를 통과한다
             // ("장비를 착용했는데 출격이 안됨" 버그 수정 — 장비 유무만으로 반드시 출격 가능해야 한다).
+            // 예외: 무료 Scav는 "빈손 출격(반입 0·획득만)"을 파산 온램프로 허용한다 — 단, 순자산이
+            //   상한 미만일 때만. 순자산 상한 게이트는 (a) 진짜 파산자(순자산 0)의 데드엔드를 열고,
+            //   (b) 벤더 판매(인벤→캡, 순자산 불변)로도 못 뚫리게 해 무한 캡 faucet을 유계화한다.
+            //   순자산이 상한을 넘으면 빈손 Scav가 닫혀 유료 존(수수료 sink)으로 졸업을 강제한다.
             if (stackItems.Count == 0 && instanceItems.Count == 0)
-                throw new DomainException(ErrorCode.RaidNothingToDeploy,
-                    "반입할 아이템이 없습니다. 장비를 착용하거나 주머니에 물건을 채운 뒤 출격하세요.");
+            {
+                var netWorth = await db.ExecuteScalarAsync<long>(
+                    @"SELECT w.balance
+                        + COALESCE((SELECT SUM(s.quantity * t.base_value)
+                                    FROM inventory_stack s JOIN item_template t ON t.id = s.template_id
+                                    WHERE s.player_id = @playerId), 0)
+                        + COALESCE((SELECT SUM(t.base_value)
+                                    FROM item_instance i JOIN item_template t ON t.id = i.template_id
+                                    WHERE i.owner_player_id = @playerId), 0)
+                      FROM wallet w WHERE w.player_id = @playerId",
+                    new { playerId }, tx);
+                var scavOnramp = zone == RaidZone.Scav && netWorth < scavNetWorthCeiling;
+                if (!scavOnramp)
+                    throw new DomainException(ErrorCode.RaidNothingToDeploy,
+                        "반입할 아이템이 없습니다. 장비를 착용하거나 주머니에 물건을 채운 뒤 출격하세요(무료 Scav는 파산 시 빈손 출격 가능).");
+            }
 
             // 3) 세션 생성. 출격 마감(deadline)을 now() + 제한시간으로 설정 — 초과 후 extract/loot 시
             //    탈출 실패=사망으로 정산한다(lazy expiry). death_chance_bps는 존 기본 floor에서 시작해
