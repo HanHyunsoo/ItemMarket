@@ -916,10 +916,20 @@ public sealed class MarketRepository(
     {
         await using var db = Open();
 
-        var caps = (await db.QueryAsync(
-            @"SELECT p.id, p.display_name, w.balance AS value
+        // 순자산 = 지갑 잔액 + 보유 스택 가치(Σ 수량×기준가) + 소유 유니크 가치(Σ 기준가).
+        // at-risk(레이드 중 owner=NULL) 아이템은 자연히 제외돼 출격이 순자산 하락으로 반영된다.
+        // base_value는 참고 시세라 "대략적" 순자산이다(에스크로 잠긴 캡은 balance에서 이미 빠져 미포함 — MVP).
+        var netWorth = (await db.QueryAsync(
+            @"SELECT p.id, p.display_name,
+                w.balance
+                + COALESCE((SELECT SUM(s.quantity * t.base_value)
+                            FROM inventory_stack s JOIN item_template t ON t.id = s.template_id
+                            WHERE s.player_id = p.id), 0)
+                + COALESCE((SELECT SUM(t.base_value)
+                            FROM item_instance i JOIN item_template t ON t.id = i.template_id
+                            WHERE i.owner_player_id = p.id), 0) AS value
               FROM player p JOIN wallet w ON w.player_id = p.id
-              ORDER BY w.balance DESC, p.display_name
+              ORDER BY value DESC, p.display_name
               LIMIT @limit", new { limit }))
             .Select(r => new LeaderEntryDto((Guid)r.id, (string)r.display_name, (long)r.value)).ToList();
 
@@ -931,7 +941,7 @@ public sealed class MarketRepository(
               LIMIT @limit", new { limit }))
             .Select(r => new LeaderEntryDto((Guid)r.id, (string)r.display_name, (long)r.value)).ToList();
 
-        return new LeaderboardDto(caps, extractions);
+        return new LeaderboardDto(netWorth, extractions);
     }
 
     /// <summary>

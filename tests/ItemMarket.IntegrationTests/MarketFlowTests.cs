@@ -249,27 +249,34 @@ public class MarketFlowTests(MarketAppFixture f)
     }
 
     // fun#8: 리더보드 — 최다 캡은 잔액 내림차순, 최다 탈출은 EXTRACTED 세션 수. 공유 상태라 절대 순위
-    // 대신 구조를 검증한다(캡 내림차순 정렬 + 잔액을 크게 올린 플레이어가 1위).
+    // 대신 구조를 검증한다(순자산 내림차순 + 잔액·아이템을 크게 준 플레이어가 1위, 순자산 > 잔액).
     [Fact]
-    public async Task Leaderboard_ranks_top_caps_descending()
+    public async Task Leaderboard_ranks_top_net_worth_descending()
     {
         var admin = await _f.AuthedAs(Charlie);
-        // Bravo 잔액을 압도적으로 올려 캡 1위로 만든다.
+        var bravo = await _f.AuthedAs(Bravo);
+
+        // Bravo 잔액을 압도적으로 올린다 → 순자산 1위.
         (await admin.PostAsJsonAsync("/api/admin/wallet/adjust",
             new AdminAdjustWalletRequest(Bravo, 9_000_000, "leaderboard test"), Json)).EnsureSuccessStatusCode();
+        var balance = await Balance(bravo);
+        // 가치 있는 스택도 지급 → 순자산이 잔액보다 커진다(아이템 가치 포함 검증).
+        (await admin.PostAsJsonAsync("/api/admin/grant/stack",
+            new AdminGrantStackRequest(Bravo, 95, 50), Json)).EnsureSuccessStatusCode();
 
         var lb = await Api<LeaderboardDto>(await admin.GetAsync("/api/leaderboard"));
         Assert.True(lb.Success);
-        Assert.NotEmpty(lb.Data!.TopCaps);
+        Assert.NotEmpty(lb.Data!.TopNetWorth);
 
-        // 캡은 잔액 내림차순으로 정렬돼야 한다(인접 비교).
-        var caps = lb.Data.TopCaps;
-        for (var i = 1; i < caps.Count; i++)
-            Assert.True(caps[i - 1].Value >= caps[i].Value, "TopCaps not sorted descending");
+        // 순자산 내림차순 정렬(인접 비교).
+        var nw = lb.Data.TopNetWorth;
+        for (var i = 1; i < nw.Count; i++)
+            Assert.True(nw[i - 1].Value >= nw[i].Value, "TopNetWorth not sorted descending");
 
-        // 방금 크게 올린 Bravo가 캡 1위.
-        Assert.Equal(Bravo, caps[0].PlayerId);
-        Assert.NotEmpty(caps[0].DisplayName);
+        // Bravo가 1위이고, 순자산은 지갑 잔액 + 보유 아이템 가치라 잔액보다 크다.
+        Assert.Equal(Bravo, nw[0].PlayerId);
+        Assert.NotEmpty(nw[0].DisplayName);
+        Assert.True(nw[0].Value > balance, "net worth should exceed wallet balance (includes item value)");
 
         // 탈출 순위도 내림차순(값이 있으면).
         var ex = lb.Data.TopExtractions;
