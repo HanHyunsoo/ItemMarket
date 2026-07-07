@@ -28,6 +28,7 @@ public enum RaidItemSource
 /// </summary>
 public enum RaidZone
 {
+    Scav,   // 무료 재기 티어(수수료 0, 최저 드롭) — 파산 온램프
     Low,
     Med,
     High

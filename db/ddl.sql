@@ -244,7 +244,7 @@ CREATE TABLE raid_session (
     resolved_at TIMESTAMPTZ,     -- EXTRACTED/DIED 확정 시각(ACTIVE면 NULL)
     deadline_at TIMESTAMPTZ,     -- 출격 마감. now() 초과 후 extract/loot 시 탈출 실패=사망(lazy expiry)
     death_chance_bps INT NOT NULL DEFAULT 0, -- 누적 사망확률(bps). loot마다 상승, extract에서 롤(탈출 성공 판정)
-    zone TEXT NOT NULL DEFAULT 'Med' CHECK (zone IN ('Low','Med','High'))  -- 출격 존. 드롭 rarity 가중치·loot당 사망확률 상승률 결정
+    zone TEXT NOT NULL DEFAULT 'Med' CHECK (zone IN ('Scav','Low','Med','High'))  -- 출격 존. 드롭 rarity 가중치·loot당 사망확률·수수료 결정
 );
 -- 플레이어당 ACTIVE 세션 1개 강제(부분 유니크 인덱스). 두 번째 StartRaid는 여기서 충돌.
 CREATE UNIQUE INDEX uq_raid_active ON raid_session(player_id) WHERE status = 'ACTIVE';

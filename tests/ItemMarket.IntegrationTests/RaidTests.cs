@@ -680,14 +680,44 @@ public class RaidTests(MarketAppFixture f)
         Assert.True(snap.Data is null || snap.Data.Status != RaidStatus.Active);
     }
 
-    // fun#5: 존 메타 엔드포인트가 3존의 수수료·사망확률 상승률을 반환하고 고위험일수록 수수료가 크다.
+    // 파산 온램프: 잔액 0이어도 무료 Scav 존은 출격 가능(유료 존은 거부). 재기 경로.
+    [Fact]
+    public async Task Scav_zone_deploys_free_even_when_broke()
+    {
+        var e = await _f.AuthedAs(Echo);
+        await ClearAtRisk(Echo);
+        await ClearEquipment(e);
+        await GrantStack(Echo, 24, 3);
+        await Stash(e);
+        await BringStackToPockets(e, 24, 3, 0);
+
+        await using (var db = new NpgsqlConnection(_f.ConnString))
+        {
+            await db.OpenAsync();
+            await db.ExecuteAsync("UPDATE wallet SET balance = 0 WHERE player_id = @p", new { p = Echo });
+        }
+
+        // 잔액 0 + 유료 존(Med)은 거부.
+        var med = await Start(e, RaidZone.Med);
+        Assert.Equal(HttpStatusCode.BadRequest, med.StatusCode);
+        Assert.Equal(ErrorCode.InsufficientFunds, (await Api<RaidSessionDto>(med)).Error!.Code);
+
+        // Scav는 무료라 출격 성공(온램프).
+        var scav = await Api<RaidSessionDto>(await Start(e, RaidZone.Scav));
+        Assert.True(scav.Success);
+        Assert.Equal(RaidStatus.Active, scav.Data!.Status);
+
+        (await Die(e)).EnsureSuccessStatusCode(); // 정리
+    }
+
+    // fun#5: 존 메타 엔드포인트가 전 존의 수수료·사망확률 상승률을 반환하고 고위험일수록 수수료가 크다.
     [Fact]
     public async Task Zones_endpoint_returns_fee_and_death_rate_per_zone()
     {
         var e = await _f.AuthedAs(Echo);
         var zones = await Api<IReadOnlyList<ZoneInfoDto>>(await e.GetAsync("/api/raid/zones"));
         Assert.True(zones.Success);
-        Assert.Equal(3, zones.Data!.Count);
+        Assert.Equal(4, zones.Data!.Count); // Scav/Low/Med/High
 
         var low = zones.Data.Single(z => z.Zone == RaidZone.Low);
         var high = zones.Data.Single(z => z.Zone == RaidZone.High);

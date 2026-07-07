@@ -56,6 +56,9 @@ public sealed class MarketRepository(
     // "값비싼 장비를 걸고 나갈까"라는 반입 판돈이 실재하게 된다(반입 리스크 상시화).
     private static readonly Dictionary<RaidZone, (int[] Weights, int DeathIncBps, int BaseDeathBps)> ZoneConfig = new()
     {
+        // Scav: 무료 재기 티어 — COMMON/UNCOMMON만(최저 드롭), 낮은 위험. EV가 낮아 정상 티어 대비 열등하므로
+        // 남용 유인이 없고, 파산(수수료 낼 캡 없음) 시 유일한 온램프가 된다.
+        [RaidZone.Scav] = ([80, 20, 0, 0, 0], 600, 300),
         [RaidZone.Low] = ([55, 30, 12, 3, 0], 800, 300),
         [RaidZone.Med] = ([35, 32, 22, 9, 2], 1200, 600),
         // High: 상급 드롭 이점이 EV로 살아나도록 수수료·기본사망·램프를 완화(리밸런싱). "짧고 굵게"(≈3루팅
@@ -67,6 +70,7 @@ public sealed class MarketRepository(
     /// 창고 확장(일회성) 이후에도 recurring sink를 남긴다. 고위험 존일수록 진입 장벽이 높다.</summary>
     private long EntryFee(RaidZone zone) => zone switch
     {
+        RaidZone.Scav => 0,   // 무료 재기 티어
         RaidZone.Low => raidEntryFeeLow,
         RaidZone.High => raidEntryFeeHigh,
         _ => raidEntryFeeMed
@@ -75,6 +79,7 @@ public sealed class MarketRepository(
     /// <summary>존 메타(출격 화면용): 존별 수수료 + loot당 사망확률 상승률. 프론트가 배당을 표시한다.</summary>
     public IReadOnlyList<ZoneInfoDto> GetZones() =>
     [
+        new(RaidZone.Scav, EntryFee(RaidZone.Scav), ZoneConfig[RaidZone.Scav].DeathIncBps, ZoneConfig[RaidZone.Scav].BaseDeathBps),
         new(RaidZone.Low, EntryFee(RaidZone.Low), ZoneConfig[RaidZone.Low].DeathIncBps, ZoneConfig[RaidZone.Low].BaseDeathBps),
         new(RaidZone.Med, EntryFee(RaidZone.Med), ZoneConfig[RaidZone.Med].DeathIncBps, ZoneConfig[RaidZone.Med].BaseDeathBps),
         new(RaidZone.High, EntryFee(RaidZone.High), ZoneConfig[RaidZone.High].DeathIncBps, ZoneConfig[RaidZone.High].BaseDeathBps),
@@ -95,6 +100,7 @@ public sealed class MarketRepository(
 
     private static RaidZone ParseZone(string z) => z switch
     {
+        "Scav" => RaidZone.Scav,
         "Low" => RaidZone.Low,
         "High" => RaidZone.High,
         _ => RaidZone.Med
