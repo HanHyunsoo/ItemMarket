@@ -110,15 +110,15 @@
 - **부분 체결**: 남은 물량은 호가창에 잔존(`PartiallyFilled`).
 - **수수료**: 체결 시 판매 대금의 `fee_bps`(기본 5%)를 판매자 수령액에서 차감·소각(sink).
 
-## 그리드 스태시 규칙 (컨테이너: STASH / LOADOUT / CONTAINER)
+## 그리드 스태시 규칙 (컨테이너: STASH / POCKETS / CONTAINER)
 
 - **컨테이너 종류**: 플레이어당 고정 그리드 2종 + 장착된 백팩/리그의 중첩 그리드(가변 개수).
-  - `STASH` = 안전 보관소 **10×12**. 소유 아이템의 기본 보관 위치.
-  - `LOADOUT` = 레이드에 들고 나가는 칸 **6×8**. 비어서 시작하며 이동(반입/반출)으로만 채워진다.
+  - `STASH` = 안전 보관소 **가로 12 고정 · 세로 가변**(`player.stash_rows`, 기본 60). 소유 아이템의 기본 보관 위치.
+  - `POCKETS` = 캐릭터 내재 주머니 **4×1**. 착용 장비처럼 항상 존재하며, 여기 담긴 것은 출격 시 at-risk가 된다.
   - `CONTAINER` = 장착된 백팩/리그의 **내부(중첩) 그리드**. 크기는 그 컨테이너 인스턴스의
     template(`container_w × container_h`, 예: 백팩 5×5·리그 4×3). 특정 컨테이너 인스턴스를 가리키므로
     이동 요청·배치에 `ContainerInstanceId`(장착된 백팩/리그의 인스턴스 id)가 함께 필요하다.
-  - 크기는 `StashDto.GridW/GridH`, 어느 컨테이너인지는 `StashDto.Container`(`Stash`\|`Loadout`\|`Container`).
+  - 크기는 `StashDto.GridW/GridH`, 어느 컨테이너인지는 `StashDto.Container`(`Stash`\|`Pockets`\|`Container`).
   - 각 배치(`StashPlacementDto`)도 `Container`와(중첩이면) `ContainerInstanceId`를 갖는다. 열거값은 PascalCase로 직렬화.
 - **footprint**: 아이템은 좌상단 `(x,y)`에서 템플릿의 `grid_w × grid_h` 칸을 차지한다.
   스택형(FOOD/MEDICAL/AMMO)은 컨테이너당 **1×1** 한 칸(+그 컨테이너에 담긴 `Quantity`),
@@ -128,11 +128,11 @@
   `GET /api/inventory` 총량은 컨테이너 이동과 무관하게 항상 보존된다(반입/반출로 늘거나 줄지 않음).
 - **자동 배치**: `GET /api/stash/{container}`는 아직 어디에도 배치되지 않은 소유 아이템을
   좌상단→오른쪽→아래 first-fit으로 **STASH에** 자동 배치·영속화한다(어느 컨테이너를 조회해도
-  누락분은 STASH로 회수 → 유실 방지). LOADOUT은 자동 배치 대상이 아니다. 이미 배치된 아이템은
+  누락분은 STASH로 회수 → 유실 방지). POCKETS·중첩 컨테이너는 자동 배치 대상이 아니다. 이미 배치된 아이템은
   자리를 유지하며, STASH가 가득 차 못 들어간 항목은 STASH 뷰의 `Unplaced`로 반환된다.
 - **이동(`POST /api/stash/move`)**: `FromContainer`/`ToContainer`로 두 가지를 모두 처리한다.
   - **같은 컨테이너 재배치**(`From==To`): 위치만 갱신.
-  - **컨테이너 간 이동**(`From!=To`, stash↔loadout = 반입/반출): 원본에서 빼고 대상에 넣는 것을
+  - **컨테이너 간 이동**(`From!=To`, stash↔pockets·container = 반입/반출): 원본에서 빼고 대상에 넣는 것을
     **원자적으로** 수행한다.
   - 서버 권위 검증 — 소유권 + 경계(footprint가 대상 컨테이너 안) + 겹침(대상 컨테이너의 다른
     배치와 충돌 금지, 이동 대상 자신은 제외). 위반 시 `PlacementInvalid`(400).
@@ -166,14 +166,15 @@
 - **동시성**: 장비 조작은 스태시와 **같은 grain(키=playerId)** 에서 처리되어 이동·정합화와 직렬화된다
   (장착이 그리드 배치를 제거하고 정합화가 다시 놓지 않도록 하는 것이 원자적).
 
-## 익스트랙션 레이드 (`/api/raid/*`)
+## 익스트랙션 레이드 (`/api/raid/*`) — 거래소 경제의 공급·소각 엔진
 
-생존형(extraction) 게임의 시그니처 루프를 **서비스 계층 세션 상태기계 + 원자적 정산**으로
-모델링한다. 게임플레이 틱/전투는 범위 밖 — 이 백엔드는 게임 서버가 호출하는 서비스이며
-`extract`/`die`는 명시적 엔드포인트다(실제 통합에서는 게임 서버가 결과를 알린다).
+거래소 경제에 수요·공급을 만드는 루프를 **서비스 계층 세션 상태기계 + 원자적 정산**으로 모델링한다.
+게임플레이 틱/전투는 범위 밖 — 이 백엔드는 게임 서버가 호출하는 서비스이며 `extract`/`die`는 명시적
+엔드포인트다(실제 통합에서는 게임 서버가 결과를 알린다).
 
-- **루프**: 플레이어가 **LOADOUT**을 채운다(기존 `POST /api/stash/move`) → **StartRaid** 로 로드아웃을
-  "위험(at-risk)"으로 잠근다 → **Extract**(생존, 전량 **원위치로 복원**) 또는 **Die**(위험 아이템 소실).
+- **루프**: 플레이어가 **주머니(POCKETS)·장비·중첩 컨테이너**를 채운다(`POST /api/stash/move`·`equip`) →
+  **StartRaid** 로 스태시 밖 전부를 "위험(at-risk)"으로 잠근다 → **Extract**(생존, 전량 **원위치로
+  복원**) 또는 **Die**(위험 아이템 소실).
 - **상태기계**: `(없음) --start--> ACTIVE --extract--> EXTRACTED` / `ACTIVE --die--> DIED`.
   `RaidSessionDto.Status`(`Active`\|`Extracted`\|`Died`, PascalCase 직렬화).
 - **플레이어당 ACTIVE 세션 1개**: 진행 중 다시 `start`하면 `RaidActive`(**409**). DB의 부분 유니크
@@ -181,13 +182,13 @@
 - **`GET /api/raid`**: **ACTIVE 세션만** 스냅샷으로 반환하고, 진행 중 레이드가 없으면 `null`이다
   (계약: `null` = 진행 중 레이드 없음). 해결된(EXTRACTED/DIED) 세션은 반환하지 않는다 — 결과 화면은
   `extract`/`die` 응답으로 표시한다.
-- **위험(at-risk) 범위**: 로드아웃(LOADOUT) 뿐 아니라 **장착 슬롯 전부**(헬멧/방어구/무기/백팩/리그)와
+- **위험(at-risk) 범위**: 주머니(POCKETS) 뿐 아니라 **장착 슬롯 전부**(헬멧/방어구/무기/백팩/리그)와
   **장착된 백팩/리그의 중첩 그리드 내용물**까지 모두 위험이다. 즉 인형 위에 걸친 것과 그 백팩 안의
   것도 StartRaid로 잠기고, Die 시 함께 소실된다. 장착 슬롯은 StartRaid에서 비워진다(생존 시 원위치로 복원).
 - **StartRaid(원자적, 매도 에스크로와 동일한 자산 잠금 재사용)**: 위험 스택은 `inventory_stack`에서
-  차감, 위험 유니크(로드아웃/장착/중첩 내용물)는 `item_instance.owner_player_id = NULL`. 로드아웃·중첩
+  차감, 위험 유니크(주머니/장착/중첩 내용물)는 `item_instance.owner_player_id = NULL`. 주머니·중첩
   배치와 장착 슬롯을 비우고 위험 스냅샷 `raid_session_item`(source=`BROUGHT`)에 기록한다. 이때 각 반입
-  아이템의 **원위치를 함께 스냅샷**한다(`origin_container` = `STASH`/`LOADOUT`/`CONTAINER`/`EQUIP`,
+  아이템의 **원위치를 함께 스냅샷**한다(`origin_container` = `STASH`/`POCKETS`/`CONTAINER`/`EQUIP`,
   `origin_container_instance_id`(중첩 백팩·리그), `origin_slot`(장착 슬롯), `origin_x`/`origin_y`(그리드 칸))
   — 생존 시 정확히 그 자리로 되돌리기 위함이다. 위험 아이템은 인벤에서 사라지므로 **레이드 중 판매/이동/배치가
   자동 거부**된다(기존 에스크로 검사가 그대로 거른다).
@@ -195,15 +196,16 @@
   서버가 세션 **존(zone)의 rarity 가중치**로 등급을 롤하고 그 등급의 `item_template` 중 랜덤 1종을 뽑아
   `LOOTED` 위험 아이템으로 추가한다. 수량은 스택이면 `1..max_stack`(상한 초과 원천 불가), 유니크는
   `item_instance`를 `owner=NULL`·`origin='RAID'`로 materialize(소유는 Extract 시 부여). 응답 `LootResultDto`는
-  이번 드롭(`dropped`)과 갱신 세션(`session`)을 함께 준다. loot마다 **존별 사망확률**(Low +8% / Med +12% /
-  High +20% /loot)이 오른다. 마감 초과로 loot하면 탈출 실패=사망 정산(`dropped=null`, `session.status=Died`).
+  이번 드롭(`dropped`)과 갱신 세션(`session`)을 함께 준다. loot마다 **존별 사망확률**(Scav +6% / Low +8% /
+  Med +12% / High +15% /loot)이 존별 기본 사망확률(floor)에서 시작해 오른다. 마감 초과로 loot하면
+  탈출 실패=사망 정산(`dropped=null`, `session.status=Died`).
 - **Extract = 보존 + 원위치 복원**: 반입(`BROUGHT`) + 획득(`LOOTED`) 전량을 소유로 복귀(스택 가산 /
   유니크 owner 복원)한 뒤, 물리 위치를 **한 트랜잭션 안에서** 복원한다 — STASH로 자동 덤프하지 않는다.
   - **반입(BROUGHT)**: StartRaid에서 스냅샷한 `origin_*`으로 정확히 되돌린다 — `EQUIP`은 `player_equipment`
-    슬롯으로, `LOADOUT`/`CONTAINER`(백팩·리그 내부)/`STASH`는 `stash_placement`의 원래 칸으로 재삽입.
-    즉 생존하면 장비·로드아웃 배치가 레이드 직전 그대로 유지된다.
+    슬롯으로, `POCKETS`/`CONTAINER`(백팩·리그 내부)/`STASH`는 `stash_placement`의 원래 칸으로 재삽입.
+    즉 생존하면 장비·주머니 배치가 레이드 직전 그대로 유지된다.
   - **획득(LOOTED)**: 원위치가 없으므로 **반입 공간에 first-fit 배치**한다. 우선순위는
-    **① 장착된 백팩/리그의 중첩 그리드(슬롯 순) → ② LOADOUT → ③ STASH 오버플로**. 스택은 같은 물리
+    **① 장착된 백팩/리그의 중첩 그리드(슬롯 순) → ② POCKETS → ③ STASH 오버플로**. 스택은 같은 물리
     컨테이너에 동일 템플릿 칸이 있으면 그 칸에 수량을 합산한다. 어느 곳에도 자리가 없으면 미배치로
     남고(소유는 유지) 다음 `GET /api/stash`에서 STASH로 정합화된다. 총량은 항상 보존.
 - **Die = at-risk(위험)만 소실**: 위험 아이템 전량 소각(스택 미복귀 / 유니크 tombstone: `owner=NULL`,
