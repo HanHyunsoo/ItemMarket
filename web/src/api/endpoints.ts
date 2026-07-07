@@ -25,6 +25,7 @@ import type {
   RaidHistoryEntryDto,
   RaidSessionDto,
   RaidZone,
+  ZoneInfoDto,
   RefreshRequest,
   StashDto,
   StashUpgradeResultDto,
@@ -83,6 +84,7 @@ export const stashApi = {
 // start는 존(zone)을 받고, loot(scavenge)는 서버가 드롭을 결정해 LootResultDto를 돌려준다.
 export const raidApi = {
   get: () => api.get<RaidSessionDto | null>('/api/raid'),
+  zones: () => api.get<ZoneInfoDto[]>('/api/raid/zones'),
   start: (zone: RaidZone = 'Med') => api.post<RaidSessionDto>('/api/raid/start', { zone }),
   loot: () => api.post<LootResultDto>('/api/raid/loot'),
   extract: () => api.post<RaidSessionDto>('/api/raid/extract'),

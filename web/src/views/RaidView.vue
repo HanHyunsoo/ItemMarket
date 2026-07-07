@@ -18,6 +18,7 @@ import type {
   RaidSessionDto,
   RaidZone,
   StashDto,
+  ZoneInfoDto,
 } from '@/api/types'
 
 const SLOT_LABEL: Record<EquipSlot, string> = {
@@ -55,6 +56,15 @@ const ZONES: { key: RaidZone; label: string; hint: string }[] = [
   { key: 'High', label: 'High · 고위험', hint: '상급 드롭 · 사망확률 급상승' },
 ]
 const selectedZone = ref<RaidZone>('Med')
+// 존 배당 메타(수수료·사망확률 상승률)는 서버에서 받아 표시(단일 진실).
+const zoneMeta = ref<Map<RaidZone, ZoneInfoDto>>(new Map())
+function zoneFee(z: RaidZone): number | null {
+  return zoneMeta.value.get(z)?.entryFee ?? null
+}
+function zoneDeathPct(z: RaidZone): number | null {
+  const bps = zoneMeta.value.get(z)?.deathChancePerLootBps
+  return bps == null ? null : bps / 100
+}
 
 // prep | active | outcome — drives which panel shows.
 const mode = computed<'prep' | 'active' | 'outcome'>(() => {
@@ -143,8 +153,9 @@ onMounted(async () => {
   loading.value = true
   try {
     await catalog.ensureLoaded()
-    const [r] = await Promise.all([raidApi.get(), loadDeployPreview()])
+    const [r, zones] = await Promise.all([raidApi.get(), raidApi.zones(), loadDeployPreview()])
     raid.value = r
+    zoneMeta.value = new Map(zones.map((z) => [z.zone, z]))
   } catch (err) {
     toastError(err, 'Could not reach the raid controller.')
   } finally {
@@ -368,6 +379,9 @@ function goGear(): void {
             >
               <span class="zone-name">{{ z.label }}</span>
               <span class="zone-hint">{{ z.hint }}</span>
+              <span v-if="zoneFee(z.key) !== null" class="zone-stats">
+                수수료 {{ caps(zoneFee(z.key)) }} 캡 · 사망 +{{ zoneDeathPct(z.key)?.toFixed(0) }}%/루팅
+              </span>
             </button>
           </div>
         </div>
@@ -378,7 +392,8 @@ function goGear(): void {
           :loading="deploying"
           @click="onDeploy"
         >
-          출격 · DEPLOY ({{ selectedZone }})
+          출격 · DEPLOY ({{ selectedZone
+          }}{{ zoneFee(selectedZone) !== null ? ` · ${caps(zoneFee(selectedZone))}캡` : '' }})
         </el-button>
       </aside>
     </div>
@@ -691,6 +706,11 @@ function goGear(): void {
 .zone-hint {
   font-size: 10px;
   color: var(--wx-text-dim);
+}
+.zone-stats {
+  font-size: 10px;
+  color: var(--wx-amber-bright);
+  margin-top: 2px;
 }
 /* 루팅 버튼 */
 .scavenge-note {

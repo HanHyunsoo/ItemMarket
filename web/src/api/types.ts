@@ -267,6 +267,13 @@ export interface StartRaidRequest {
   zone: RaidZone
 }
 
+// 존 메타(출격 화면용): 존별 출격 수수료와 loot당 사망확률 상승률(bps).
+export interface ZoneInfoDto {
+  zone: RaidZone
+  entryFee: number
+  deathChancePerLootBps: number
+}
+
 // 루팅 결과: 서버가 세션 존의 rarity 가중치로 무엇을·얼마나 드롭할지 결정한다. 이번 획득(dropped)과
 // 갱신 세션(session)을 함께 받는다. 마감 초과로 루팅하면 dropped=null, session.status=Died.
 export interface LootResultDto {

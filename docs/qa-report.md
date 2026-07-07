@@ -321,9 +321,11 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       존(Low/Med/High)이 rarity 가중치·loot당 사망확률 상승률을 함께 결정(리스크/보상, #1 연동).
       계약 breaking(loot 서버 결정·LootResultDto·StartRaidRequest zone). (`MarketRepository.cs`, `RaidView.vue`, 테스트 재작성)
 - [ ] **#4** loot마다 사망 확률 상승(그리드 미터). `[중]`
-- [x] **#5** 목적 있는 캡 싱크 — 캡으로 스태시 행 확장(+6행, 점증 가격) `POST /api/stash/upgrade`.
-      #3로 유한해진 loot 경제에 "파밍→거래→창고 확장" 루프를 닫는다. GearView에 확장 버튼(다음 가격).
-      (`MarketRepository.UpgradeStashRowsAsync`, `GearView.vue`) — 내구도/수리·보험·출격 수수료는 향후.
+- [x] **#5** 목적 있는 캡 싱크 — (a) 캡으로 스태시 행 확장(+6행, 점증 가격) `POST /api/stash/upgrade`,
+      (b) **존별 출격 수수료**(recurring 싱크, Low 150/Med 400/High 1000) `POST /api/raid/start` 차감 +
+      존 메타 `GET /api/raid/zones`로 배당 표시. #3로 유한해진 loot 경제에 "파밍→거래→확장" 루프를 닫고,
+      무비용 1-루팅 그라인딩을 억제한다. (`MarketRepository`, `GearView.vue`, `RaidView.vue`) —
+      내구도/수리·보험은 향후.
 - [x] **#6** 첫 방문 온보딩 — 마켓 랜딩에 루프 설명 스트립(출격→탈출/사망→거래→확장), localStorage로
       1회성 dismiss. (`MarketView.vue`)
 - [x] **#7** 이중어 네비 통일(Market·마켓 … Admin·운영) + Stash/Gear 명칭 충돌 해소(소지품 목록=Inventory·
