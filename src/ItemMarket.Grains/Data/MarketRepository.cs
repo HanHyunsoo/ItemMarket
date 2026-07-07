@@ -946,26 +946,30 @@ public sealed class MarketRepository(
         (long)r.unit_price, (int)r.quantity, (int)r.remaining_quantity, (Guid?)r.instance_id,
         Enums.ToStatus((string)r.status), (long)r.escrow_caps, (DateTimeOffset)r.created_at);
 
+    // 순자산 = 지갑 잔액 + 보유 스택 가치(Σ 수량×기준가) + 소유 유니크 가치(Σ 기준가).
+    // at-risk(레이드 중 owner=NULL) 아이템은 자연히 제외돼 출격이 순자산 하락으로 반영된다.
+    // Top-N 쿼리와 "내 순위" 랭크 쿼리가 동일 식을 쓰도록 한 곳에 둔다(정렬 기준 drift 방지).
+    private const string NetWorthExpr =
+        @"w.balance
+          + COALESCE((SELECT SUM(s.quantity * t.base_value)
+                      FROM inventory_stack s JOIN item_template t ON t.id = s.template_id
+                      WHERE s.player_id = p.id), 0)
+          + COALESCE((SELECT SUM(t.base_value)
+                      FROM item_instance i JOIN item_template t ON t.id = i.template_id
+                      WHERE i.owner_player_id = p.id), 0)";
+
     /// <summary>
-    /// 리더보드: 최다 캡 보유(지갑 잔액 내림차순)와 최다 생환(EXTRACTED 세션 수) 상위 N명.
-    /// 경제에 판돈이 생긴 뒤의 사회적 목표(#8). 이름 동률은 표시명으로 안정 정렬.
+    /// 리더보드: 최다 순자산(지갑+보유 아이템 가치)과 최다 생환(EXTRACTED 세션 수) 상위 N명 +
+    /// 호출자 본인의 순위(Top-N 밖이어도). 경제에 판돈이 생긴 뒤의 사회적 목표(#8). 이름 동률은 표시명으로 안정 정렬.
+    /// 랭크 = 나보다 앞선 사람 수 + 1 (값 내림차순, 동률은 표시명 오름차순 — Top-N 정렬과 동일 순서).
     /// </summary>
-    public async Task<LeaderboardDto> GetLeaderboardAsync(int limit = 10)
+    public async Task<LeaderboardDto> GetLeaderboardAsync(Guid playerId, int limit = 10)
     {
         await using var db = Open();
 
-        // 순자산 = 지갑 잔액 + 보유 스택 가치(Σ 수량×기준가) + 소유 유니크 가치(Σ 기준가).
-        // at-risk(레이드 중 owner=NULL) 아이템은 자연히 제외돼 출격이 순자산 하락으로 반영된다.
         // base_value는 참고 시세라 "대략적" 순자산이다(에스크로 잠긴 캡은 balance에서 이미 빠져 미포함 — MVP).
         var netWorth = (await db.QueryAsync(
-            @"SELECT p.id, p.display_name,
-                w.balance
-                + COALESCE((SELECT SUM(s.quantity * t.base_value)
-                            FROM inventory_stack s JOIN item_template t ON t.id = s.template_id
-                            WHERE s.player_id = p.id), 0)
-                + COALESCE((SELECT SUM(t.base_value)
-                            FROM item_instance i JOIN item_template t ON t.id = i.template_id
-                            WHERE i.owner_player_id = p.id), 0) AS value
+            $@"SELECT p.id, p.display_name, {NetWorthExpr} AS value
               FROM player p JOIN wallet w ON w.player_id = p.id
               ORDER BY value DESC, p.display_name
               LIMIT @limit", new { limit }))
@@ -979,7 +983,54 @@ public sealed class MarketRepository(
               LIMIT @limit", new { limit }))
             .Select(r => new LeaderEntryDto((Guid)r.id, (string)r.display_name, (long)r.value)).ToList();
 
-        return new LeaderboardDto(netWorth, extractions);
+        var me = await LoadLeaderMeAsync(db, playerId);
+        return new LeaderboardDto(netWorth, extractions, me);
+    }
+
+    /// <summary>호출자 본인의 순자산·생환 순위(전체 대비). Top-N 밖 플레이어의 위치 피드백용.</summary>
+    private async Task<LeaderMeDto> LoadLeaderMeAsync(NpgsqlConnection db, Guid playerId)
+    {
+        var totalPlayers = await db.ExecuteScalarAsync<long>("SELECT count(*) FROM player");
+
+        // 내 순자산 + 표시명(동률 tie-break에 필요).
+        var mine = await db.QuerySingleAsync(
+            $@"SELECT p.display_name, {NetWorthExpr} AS value
+               FROM player p JOIN wallet w ON w.player_id = p.id
+               WHERE p.id = @playerId", new { playerId });
+        long myNetWorth = (long)mine.value;
+        string myName = (string)mine.display_name;
+
+        // 순자산 순위 = 나보다 앞선(값 큼, 또는 값 동률+표시명 앞선) 사람 수 + 1.
+        var netWorthRank = await db.ExecuteScalarAsync<long>(
+            $@"SELECT 1 + count(*) FROM (
+                 SELECT p.display_name, {NetWorthExpr} AS value
+                 FROM player p JOIN wallet w ON w.player_id = p.id
+               ) nw
+               WHERE nw.value > @myNetWorth
+                  OR (nw.value = @myNetWorth AND nw.display_name < @myName)",
+            new { myNetWorth, myName });
+
+        // 내 생환 횟수.
+        long myExtractions = await db.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM raid_session WHERE player_id = @playerId AND status = 'EXTRACTED'",
+            new { playerId });
+
+        // 생환 순위: 생환 기록이 있는 사람들 사이에서만. 0회면 순위 미정(null).
+        long? extractionsRank = null;
+        if (myExtractions > 0)
+        {
+            extractionsRank = await db.ExecuteScalarAsync<long>(
+                @"SELECT 1 + count(*) FROM (
+                     SELECT p.display_name, count(rs.id) AS value
+                     FROM player p JOIN raid_session rs ON rs.player_id = p.id AND rs.status = 'EXTRACTED'
+                     GROUP BY p.id, p.display_name
+                   ) ex
+                   WHERE ex.value > @myExtractions
+                      OR (ex.value = @myExtractions AND ex.display_name < @myName)",
+                new { myExtractions, myName });
+        }
+
+        return new LeaderMeDto(playerId, myNetWorth, netWorthRank, myExtractions, extractionsRank, totalPlayers);
     }
 
     /// <summary>

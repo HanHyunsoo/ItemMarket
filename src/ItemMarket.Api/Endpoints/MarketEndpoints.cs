@@ -18,8 +18,9 @@ public static class MarketEndpoints
         // 전 종목 시세 요약(마켓 카드용): 최우선 호가·최근 체결·활성 주문 수를 한 번에.
         api.MapGet("/market/tickers", (MarketRepository repo) => Exec(() => repo.GetTickersAsync()));
 
-        // 리더보드: 최다 캡 + 최다 생환(탈출) 상위 순위.
-        api.MapGet("/leaderboard", (MarketRepository repo) => Exec(() => repo.GetLeaderboardAsync()))
+        // 리더보드: 최다 순자산 + 최다 생환(탈출) 상위 순위 + 호출자 본인의 순위(Top-N 밖이어도).
+        api.MapGet("/leaderboard", (ClaimsPrincipal u, MarketRepository repo) =>
+            Exec(() => repo.GetLeaderboardAsync(CurrentPlayer(u))))
             .WithTags("Leaderboard");
 
         // NPC 벤더 매입: 보유 아이템을 벤더가(base_value 스프레드)로 즉시 판매(캡 faucet).

@@ -286,6 +286,36 @@ public class MarketFlowTests(MarketAppFixture f)
         var ex = lb.Data.TopExtractions;
         for (var i = 1; i < ex.Count; i++)
             Assert.True(ex[i - 1].Value >= ex[i].Value, "TopExtractions not sorted descending");
+
+        // "내 순위"(Me): Bravo가 압도적 순자산 1위이므로 본인 조회 시 순자산 순위 1위.
+        var mine = await Api<LeaderboardDto>(await bravo.GetAsync("/api/leaderboard"));
+        Assert.True(mine.Success);
+        var me = mine.Data!.Me;
+        Assert.Equal(Bravo, me.PlayerId);
+        Assert.Equal(1, me.NetWorthRank);                 // 순자산 1위
+        Assert.True(me.NetWorth > balance);               // 아이템 가치 포함
+        Assert.True(me.TotalPlayers >= 1);
+        Assert.True(me.NetWorthRank <= me.TotalPlayers);
+    }
+
+    // "내 순위"(Me): 본인 순위는 Top-N 밖이어도 항상 조회된다. 생환 기록이 없으면(0회)
+    // ExtractionsRank는 null(순위 미정)이고, 순자산 순위는 항상 [1, 전체] 범위로 매겨진다.
+    [Fact]
+    public async Task Leaderboard_me_rank_is_always_present_and_bounded()
+    {
+        var p = await _f.AuthedAs(Delta);
+
+        var lb = await Api<LeaderboardDto>(await p.GetAsync("/api/leaderboard"));
+        Assert.True(lb.Success);
+        var me = lb.Data!.Me;
+        Assert.Equal(Delta, me.PlayerId);
+        Assert.True(me.TotalPlayers >= 1);
+        Assert.True(me.NetWorthRank >= 1 && me.NetWorthRank <= me.TotalPlayers); // 항상 순위가 있음
+        Assert.True(me.Extractions >= 0);
+        if (me.Extractions == 0)
+            Assert.Null(me.ExtractionsRank);              // 생환 기록 없음 → 순위 미정
+        else
+            Assert.True(me.ExtractionsRank >= 1);         // 있으면 유효 순위
     }
 
     // 캡 faucet: 벤더 매입으로 스택을 팔면 인벤 차감·지갑 증가(벤더가 = base×0.85)·wallet_ledger(VENDOR_SELL).
