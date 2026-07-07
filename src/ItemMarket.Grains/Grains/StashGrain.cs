@@ -206,7 +206,8 @@ public sealed class StashGrain(MarketRepository repo) : Grain, IStashGrain
 
         EnsureNoOverlap(to, target, placements, ctx.Footprints, isSelf: p => p.InstanceId == req.InstanceId);
 
-        await repo.UpsertInstancePlacementAsync(PlayerId, to.Kind, templateId, req.InstanceId!.Value, req.X, req.Y, to.InstanceId);
+        // 레이드 중 변이 잠금(F-1)을 적용한 경로로 배치한다(StartRaid와 DB 레벨 직렬화).
+        await repo.MoveInstancePlacementAsync(PlayerId, to.Kind, templateId, req.InstanceId!.Value, req.X, req.Y, to.InstanceId);
     }
 
     /// <summary>

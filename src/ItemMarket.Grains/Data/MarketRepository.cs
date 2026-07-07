@@ -514,6 +514,33 @@ public sealed class MarketRepository(
             new { playerId, container = container.ToDb(), templateId, instanceId, cid = containerInstanceId, x, y });
     }
 
+    /// <summary>사용자의 유니크 인스턴스 이동(MoveItem 경로) — 레이드 시작과 DB 레벨 직렬화 후 ACTIVE 재확인해
+    /// 변이를 거부한다(F-1). 정합화(ReconcileAsync)의 자동 배치는 레이드 중에도 STASH-안전 아이템을 재배치해야
+    /// 하므로 락 없는 UpsertInstancePlacementAsync를 그대로 쓴다 — 사용자 이동만 이 잠금 경로를 탄다.</summary>
+    public async Task MoveInstancePlacementAsync(Guid playerId, GridContainer container, int templateId, Guid instanceId, int x, int y, Guid? containerInstanceId = null)
+    {
+        await using var db = Open();
+        await using var tx = await db.BeginTransactionAsync();
+        try
+        {
+            await LockPlayerAsync(db, tx, playerId);
+            await ThrowIfActiveRaidAsync(db, tx, playerId);
+            await db.ExecuteAsync(
+                @"INSERT INTO stash_placement(player_id, container, kind, template_id, instance_id, container_instance_id, x, y, quantity)
+                  VALUES (@playerId, @container, 'INSTANCE', @templateId, @instanceId, @cid, @x, @y, 1)
+                  ON CONFLICT (instance_id)
+                  DO UPDATE SET container = EXCLUDED.container, container_instance_id = EXCLUDED.container_instance_id,
+                                x = EXCLUDED.x, y = EXCLUDED.y, player_id = EXCLUDED.player_id",
+                new { playerId, container = container.ToDb(), templateId, instanceId, cid = containerInstanceId, x, y }, tx);
+            await tx.CommitAsync();
+        }
+        catch
+        {
+            await tx.RollbackAsync();
+            throw;
+        }
+    }
+
     /// <summary>
     /// 특정 물리 컨테이너의 스택형 배치 삭제. x/y를 지정하면 그 정확한 칸 하나만(다중 스택 중 하나가
     /// 0이 됐을 때), 생략하면 그 컨테이너의 해당 템플릿 스택 전부(더 이상 소유하지 않을 때 일괄 정리).
@@ -967,8 +994,8 @@ public sealed class MarketRepository(
                 (SELECT MAX(executed_at) FROM trade tr WHERE tr.template_id = t.id) AS last_trade_at,
                 (SELECT count(*) FROM market_order o
                    WHERE o.template_id = t.id AND o.status IN ('OPEN','PARTIALLY_FILLED')) AS open_orders,
-                GREATEST(1, floor(t.base_value * (10000 - {VendorSpreadBps}) / 10000)) AS vendor_bid,
-                GREATEST(1, ceil (t.base_value * (10000 + {VendorSpreadBps}) / 10000)) AS vendor_ask
+                GREATEST(1, floor(t.base_value * (10000 - {VendorSpreadBps}) / 10000.0)::bigint) AS vendor_bid,
+                GREATEST(1, ceil (t.base_value * (10000 + {VendorSpreadBps}) / 10000.0)::bigint) AS vendor_ask
               FROM item_template t
               ORDER BY t.id");
         return rows.Select(r => new MarketTickerDto(

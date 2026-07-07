@@ -697,6 +697,34 @@ public class RaidTests(MarketAppFixture f)
         Assert.True(high.BaseDeathBps > low.BaseDeathBps);             // 고위험 존일수록 기본 위험도 큼
     }
 
+    // F-1(인스턴스 이동 경로): 백팩 내용물(유니크)을 STASH로 옮기는 동시에 StartRaid가 그 백팩+내용물을
+    // at-risk로 걷어가도, advisory 락으로 DB에서 직렬화돼 Extract 원위치 복원 500(소프트락)이 없어야 한다.
+    [Fact]
+    public async Task Concurrent_start_and_instance_move_never_soft_locks_extract()
+    {
+        var e = await _f.AuthedAs(Echo);
+        for (var round = 0; round < 6; round++)
+        {
+            await ClearAtRisk(Echo);
+            await ClearEquipment(e);
+            var backpack = await GrantInstance(Echo, Backpack, 100);
+            var gun = await GrantInstance(Echo, Pistol, 300);
+            await Stash(e);
+            await Equip(e, EquipSlot.Backpack, backpack);
+            await Stash(e); // 백팩 장착 후 재동기화(권총이 STASH에 남아있게)
+            await BringInstanceToContainer(e, gun, backpack, 0, 0); // 권총을 백팩(중첩) 안으로
+
+            // 동시: Start(백팩+내용물을 at-risk로 걷어감) vs Move(권총을 STASH로 빼냄).
+            var startTask = Start(e);
+            var moveTask = Move(e, new MoveStashItemRequest(StashEntryKind.Instance, null, gun, 0, 0));
+            await Task.WhenAll(startTask, moveTask);
+
+            // 핵심: Extract가 원위치 복원 충돌로 500(Unknown) 소프트락에 빠지지 않는다.
+            var ext = await Extract(e);
+            Assert.NotEqual(HttpStatusCode.InternalServerError, ext.StatusCode);
+        }
+    }
+
     // 원자성(best-effort 폴트 인젝션): 정산 도중 실패하면 전량 롤백된다.
     // 주머니 수량과 inventory_stack을 어긋나게(외부 변조) 만들어 StartRaid 스택 가드를 실패시키고,
     // 같은 트랜잭션에서 먼저 INSERT된 raid_session이 롤백되는지(ACTIVE 세션 미생성) 검증한다.

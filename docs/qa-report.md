@@ -241,6 +241,12 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       `RaidSessionGrain.StartRaid`는 별개 grain이라 Orleans가 서로 직렬화 못 한다. `pg_advisory_xact_lock`
       (playerId)으로 DB 레벨 직렬화 + 변이 트랜잭션 내부에서 ACTIVE 레이드 재확인해 동시 인터리브의
       500+소프트락을 차단. 동시성 회귀 테스트 `RaidTests.Concurrent_start_and_equip_never_soft_locks_extract` 추가.
+- [x] **F-1b** (재검증·High) F-1이 유니크 인스턴스 이동 경로를 빠뜨린 커버리지 갭 — `MoveInstanceAsync`가
+      락 없는 `UpsertInstancePlacementAsync`를 써 StartRaid↔MoveInstance TOCTOU가 잔존(Extract 500+소프트락).
+      락 적용 `MoveInstancePlacementAsync` 신설(정합화 자동배치는 락 없는 기존 메서드 유지). 회귀 테스트
+      `Concurrent_start_and_instance_move_never_soft_locks_extract` 추가.
+- [x] **벤더 vendorAsk 정수나눗셈** (재검증·Low) `/10000`이 정수 나눗셈이라 `ceil` 무력화 → `/10000.0::bigint`로
+      교정(표시 정확도, 실거래 무관). (`MarketRepository.GetTickersAsync`)
 - [x] **만료 성공률 표기** (최종 QA·fun) 마감 초과 시 EXTRACT 버튼이 실제(0%)와 다른 성공률을 보이던 것을
       "탈출 시도 · 실패 확정"으로 교정, 미터도 만료 시 0%. (`RaidView.vue`)
 - [x] **F-2** (최종 QA·Low) 존 값 검증 — `StartRaidAsync`가 `Enum.IsDefined`로 범위 밖 zone 정수를
