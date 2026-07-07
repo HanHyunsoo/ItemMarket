@@ -32,6 +32,12 @@ append-only 원장으로 회계하고 고부하 동시성에서 **돈·아이템
 <td><img src="docs/demo-trade.gif" alt="실시간 체결 데모" width="100%" /></td>
 <td><img src="docs/demo-grid.gif" alt="그리드 드래그앤드롭 데모" width="100%" /></td>
 </tr>
+<tr>
+<td colspan="2"><b>익스트랙션 레이드 루프</b> — 존(Low/Med/High)을 골라 <b>수수료</b>를 내고 출격, 루팅할수록 <b>사망확률이 오르고</b> 탈출 성공률이 떨어집니다("한 상자 더 vs 지금 탈출"). 제한시간·기본 사망확률로 반입 자체가 판돈입니다.</td>
+</tr>
+<tr>
+<td colspan="2"><img src="docs/demo-raid.gif" alt="익스트랙션 레이드 루프 데모" width="100%" /></td>
+</tr>
 </table>
 
 ---

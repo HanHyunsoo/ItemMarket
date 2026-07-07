@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 
 const WEB = process.env.WEB ?? 'http://localhost:5173'
+const API = process.env.API ?? 'http://localhost:5080'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const OUT = resolve(HERE, '../../docs')
 mkdirSync(OUT, { recursive: true })
@@ -210,6 +211,105 @@ async function recordGrid(browser) {
 }
 
 // ---------------------------------------------------------------------------
+// Seed a raider (Raider_Delta) with an equipped weapon so StartRaid has something
+// to bring in (empty-handed deploy is rejected). Also clears any lingering ACTIVE
+// session so the /raid screen opens on the prep (zone select) view. API-driven.
+const RAIDER = '44444444-4444-4444-4444-444444444444' // Raider_Delta
+const ADMIN = '33333333-3333-3333-3333-333333333333' // Trader_Charlie
+const WEAPON_TPL = 74 // 마카로프 권총
+
+async function login(playerId) {
+  const r = await fetch(`${API}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ playerId }),
+  })
+  return (await r.json()).data.accessToken
+}
+
+async function setupRaider() {
+  const tg = await login(RAIDER)
+  const ta = await login(ADMIN)
+  const auth = (t) => ({ Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' })
+  // Close any ACTIVE session (ignore if none), then equip a fresh weapon to deploy with.
+  await fetch(`${API}/api/raid/die`, { method: 'POST', headers: auth(tg) }).catch(() => {})
+  const g = await fetch(`${API}/api/admin/grant/instance`, {
+    method: 'POST',
+    headers: auth(ta),
+    body: JSON.stringify({ playerId: RAIDER, templateId: WEAPON_TPL, durability: null, attachments: [] }),
+  })
+  const instanceId = (await g.json()).data.id
+  await fetch(`${API}/api/equipment/equip`, {
+    method: 'POST',
+    headers: auth(tg),
+    body: JSON.stringify({ slot: 'Weapon', instanceId }),
+  })
+}
+
+// Raid loop: pick a zone, deploy, scavenge a couple of times (death-chance meter
+// climbs), then attempt extraction — the push-your-luck core loop.
+async function recordRaid(browser) {
+  await setupRaider()
+
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    colorScheme: 'dark',
+    recordVideo: { dir: VIDEO_DIR, size: { width: 1280, height: 800 } },
+  })
+  const page = await context.newPage()
+
+  await page.goto(`${WEB}/market`, { waitUntil: 'networkidle' })
+  await selectPlayer(page, 'Raider_Delta')
+
+  await page.goto(`${WEB}/raid`, { waitUntil: 'networkidle' })
+  await page.locator('.zone-chip').first().waitFor({ state: 'visible', timeout: 15000 })
+  await wait(1200)
+
+  // Hover the zone chips to show fee / base-death / per-loot rates, then pick Med.
+  const chips = page.locator('.zone-chip')
+  for (const i of [0, 2, 1]) {
+    const b = await chips.nth(i).boundingBox()
+    if (b) await glide(page, b.x + b.width / 2, b.y + b.height / 2)
+    await wait(650)
+  }
+  await chips.nth(1).click() // Med
+  await wait(500)
+
+  // Deploy.
+  const deploy = page.locator('.deploy-btn')
+  {
+    const b = await deploy.boundingBox()
+    if (b) await glide(page, b.x + b.width / 2, b.y + b.height / 2)
+  }
+  await wait(300)
+  await deploy.click()
+  await page.locator('.scavenge-btn').first().waitFor({ state: 'visible', timeout: 15000 })
+  await wait(1400) // linger on countdown timer + at-risk manifest + survival meter
+
+  // Scavenge a few times — the survival % drops as death-chance climbs.
+  const scav = page.locator('.scavenge-btn')
+  for (let i = 0; i < 3; i++) {
+    const b = await scav.boundingBox()
+    if (b) await glide(page, b.x + b.width / 2, b.y + b.height / 2)
+    await wait(250)
+    await scav.click()
+    await wait(1600) // drop toast + meter update
+  }
+
+  // Attempt extraction — the gamble resolves (extracted or died by the rolled chance).
+  const extract = page.locator('.resolve-btn.extract')
+  {
+    const b = await extract.boundingBox()
+    if (b) await glide(page, b.x + b.width / 2, b.y + b.height / 2)
+  }
+  await wait(400)
+  await extract.click()
+  await wait(3000) // outcome screen (survived / killed)
+  await context.close()
+  return page.video().path()
+}
+
+// ---------------------------------------------------------------------------
 function toGif(webm, outName, { fps = 13, width = 950, ss = '0', t } = {}) {
   const out = resolve(OUT, outName)
   const palette = join(VIDEO_DIR, outName.replace('.gif', '.png'))
@@ -235,12 +335,15 @@ const run = async () => {
   const tradeWebm = await recordTrade(browser)
   console.log('recording demo-grid …')
   const gridWebm = await recordGrid(browser)
+  console.log('recording demo-raid …')
+  const raidWebm = await recordRaid(browser)
   await browser.close()
 
   console.log('converting → GIF (ffmpeg two-pass palette) …')
   // Trim the sign-in/navigation dead time at the head of each clip.
   toGif(tradeWebm, 'demo-trade.gif', { fps: 13, width: 950, ss: '3.2' })
   toGif(gridWebm, 'demo-grid.gif', { fps: 13, width: 950, ss: '3.2' })
+  toGif(raidWebm, 'demo-raid.gif', { fps: 13, width: 950, ss: '3.2' })
   console.log('done. raw webm left in', VIDEO_DIR, '(not committed)')
 }
 
