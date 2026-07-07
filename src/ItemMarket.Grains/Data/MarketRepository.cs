@@ -23,7 +23,7 @@ public sealed class MarketRepository(
     long stashUpgradeStep = 1000,
     long raidEntryFeeLow = 150,
     long raidEntryFeeMed = 400,
-    long raidEntryFeeHigh = 1000)
+    long raidEntryFeeHigh = 600)
 {
     /// <summary>스태시 확장 단위(행)와 상한(DDL CHECK와 일치).</summary>
     private const int StashRowsPerUpgrade = 6;
@@ -58,7 +58,9 @@ public sealed class MarketRepository(
     {
         [RaidZone.Low] = ([55, 30, 12, 3, 0], 800, 300),
         [RaidZone.Med] = ([35, 32, 22, 9, 2], 1200, 600),
-        [RaidZone.High] = ([15, 30, 35, 15, 5], 2000, 1200),
+        // High: 상급 드롭 이점이 EV로 살아나도록 수수료·기본사망·램프를 완화(리밸런싱). "짧고 굵게"(≈3루팅
+        // 최대 EV)가 Med의 "길게 쌓기"(≈4루팅)를 상회 — 진짜 고위험 고보상. 드롭 가중치는 유지.
+        [RaidZone.High] = ([15, 30, 35, 15, 5], 1500, 1000),
     };
 
     /// <summary>존별 출격 수수료(캡 싱크). 매 출격마다 소각돼 저욕심 1-루팅 그라인딩을 억제하고
