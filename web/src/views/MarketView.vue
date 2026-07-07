@@ -187,11 +187,17 @@ function open(id: number) {
           </div>
         </template>
         <template v-else>
-          <div class="card-value mono">
+          <!-- 플레이어 호가가 없으면 벤더 참고 매수/매도가(base_value 스프레드) 표시 -->
+          <div v-if="tickerFor(it.id)" class="quote mono vendor">
+            <span class="bid">{{ caps(tickerFor(it.id)!.vendorBid) }}</span>
+            <span class="spread-sep">·</span>
+            <span class="ask">{{ caps(tickerFor(it.id)!.vendorAsk) }}</span>
+          </div>
+          <div v-else class="card-value mono">
             <img class="pixel" src="/sprites/cap_coin.svg" alt="" />
             {{ caps(it.baseValue) }}
           </div>
-          <div class="card-sub mono no-market">시장 없음 · 기준가</div>
+          <div class="card-sub mono no-market">벤더 참고가 · 호가 없음</div>
         </template>
       </button>
       <div v-if="!loading && filtered.length === 0" class="wx-empty">
@@ -368,6 +374,11 @@ function open(id: number) {
 .quote .dim {
   color: var(--wx-text-faint);
   font-weight: 400;
+}
+/* 벤더 참고가: 실호가보다 흐리게(참고임을 시각적으로 구분) */
+.quote.vendor {
+  opacity: 0.7;
+  font-weight: 600;
 }
 .spread-sep {
   color: var(--wx-text-faint);

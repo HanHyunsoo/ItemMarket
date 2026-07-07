@@ -315,8 +315,9 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       누적, extract 시 확률 롤(경계 결정론). RaidView에 카운트다운 타이머 + 사망확률 미터.
       "한 상자 더 vs 지금 탈출" 도박 도입. (`MarketRepository.cs`, `RaidView.vue`, 회귀 테스트 3종)
 - [x] **#2** 마켓 카드 실시간 시세 — 배치 엔드포인트 `GET /api/market/tickers`(집계) + 카드에 최우선
-      매수/매도 호가·최근 체결·유동성 점(활성 주문 수)·"시장 없음" 배지, 활동순 정렬, 15초 폴링.
-      (`MarketRepository.GetTickersAsync`, `MarketView.vue`)
+      매수/매도 호가·최근 체결·유동성 점(활성 주문 수), 활동순 정렬, 15초 폴링. 호가 없는 종목은
+      **벤더 참고가**(base_value±15% 스프레드, `vendorBid`/`vendorAsk` — 실거래 아님)로 "죽은 첫 화면"을
+      해소. (`MarketRepository.GetTickersAsync`, `MarketView.vue`)
 - [x] **#3** 서버 드롭테이블 + 존 티어 — 무료 무한 loot 폼을 서버 권위 드롭으로 대체(무한생성 차단).
       존(Low/Med/High)이 rarity 가중치·loot당 사망확률 상승률을 함께 결정(리스크/보상, #1 연동).
       계약 breaking(loot 서버 결정·LootResultDto·StartRaidRequest zone). (`MarketRepository.cs`, `RaidView.vue`, 테스트 재작성)

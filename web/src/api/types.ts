@@ -378,6 +378,8 @@ export interface MarketTickerDto {
   lastPrice: number | null
   lastTradeAt: string | null
   openOrders: number
+  vendorBid: number // base_value 기반 벤더 참고 매수가(실거래 아님)
+  vendorAsk: number // base_value 기반 벤더 참고 매도가
 }
 
 export interface PlaceOrderResult {
