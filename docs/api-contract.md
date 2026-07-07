@@ -76,7 +76,8 @@
 | DELETE | `/api/orders/{id}` | - | `OrderDto` (취소, 에스크로 환불) |
 | GET | `/api/raid` | - | `RaidSessionDto?` (**ACTIVE 세션만 반환, 없으면 `null`**) |
 | GET | `/api/raid/history?page=&size=` | - | `PagedResult<RaidHistoryEntryDto>` (해결된 EXTRACTED/DIED 세션, 최신순) |
-| POST | `/api/raid/start` | `StartRaidRequest?`(zone, 기본 Med) | `RaidSessionDto` (스태시 밖 전부를 위험으로 잠금, ACTIVE. 존이 드롭 등급·사망확률 결정) |
+| GET | `/api/raid/zones` | - | `ZoneInfoDto[]` (존별 출격 수수료·loot당 사망확률 상승률 — 출격 화면 배당 표시용) |
+| POST | `/api/raid/start` | `StartRaidRequest?`(zone, 기본 Med) | `RaidSessionDto` (스태시 밖 전부를 위험으로 잠금, ACTIVE. 존이 드롭 등급·사망확률 결정. **존별 출격 수수료 차감**(캡 싱크) — 잔액 부족 시 `InsufficientFunds`) |
 | POST | `/api/raid/loot` | - | `LootResultDto` (서버 드롭: 존 rarity 가중치로 무엇을·얼마나 결정. `{dropped, session}`) |
 | POST | `/api/raid/extract` | - | `RaidSessionDto` (탈출 시도 → 마감/누적 사망확률로 EXTRACTED 또는 DIED 판정) |
 | POST | `/api/raid/die` | - | `RaidSessionDto` (위험 아이템 소실, DIED) |

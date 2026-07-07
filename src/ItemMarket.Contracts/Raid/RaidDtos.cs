@@ -69,6 +69,9 @@ public sealed record RaidHistoryEntryDto(
 /// <summary>출격 요청. 존(리스크/보상 티어)을 선택한다. 미지정 시 Med.</summary>
 public sealed record StartRaidRequest(RaidZone Zone = RaidZone.Med);
 
+/// <summary>존 메타(출격 화면용): 존별 출격 수수료와 loot당 사망확률 상승률. 프론트가 배당을 표시한다.</summary>
+public sealed record ZoneInfoDto(RaidZone Zone, long EntryFee, int DeathChancePerLootBps);
+
 /// <summary>
 /// 루팅(scavenge) 결과. 서버가 세션 존의 rarity 가중치로 무엇을·얼마나 드롭할지 결정하므로,
 /// 클라이언트는 이번에 획득한 것(<see cref="Dropped"/>)과 갱신된 세션(<see cref="Session"/>)을 함께 받는다.

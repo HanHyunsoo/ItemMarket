@@ -20,7 +20,10 @@ public sealed class MarketRepository(
     string connectionString,
     int raidDurationSeconds = 180,
     long stashUpgradeBasePrice = 2000,
-    long stashUpgradeStep = 1000)
+    long stashUpgradeStep = 1000,
+    long raidEntryFeeLow = 150,
+    long raidEntryFeeMed = 400,
+    long raidEntryFeeHigh = 1000)
 {
     /// <summary>스태시 확장 단위(행)와 상한(DDL CHECK와 일치).</summary>
     private const int StashRowsPerUpgrade = 6;
@@ -54,6 +57,23 @@ public sealed class MarketRepository(
         [RaidZone.Med] = ([35, 32, 22, 9, 2], 1200),
         [RaidZone.High] = ([15, 30, 35, 15, 5], 2000),
     };
+
+    /// <summary>존별 출격 수수료(캡 싱크). 매 출격마다 소각돼 저욕심 1-루팅 그라인딩을 억제하고
+    /// 창고 확장(일회성) 이후에도 recurring sink를 남긴다. 고위험 존일수록 진입 장벽이 높다.</summary>
+    private long EntryFee(RaidZone zone) => zone switch
+    {
+        RaidZone.Low => raidEntryFeeLow,
+        RaidZone.High => raidEntryFeeHigh,
+        _ => raidEntryFeeMed
+    };
+
+    /// <summary>존 메타(출격 화면용): 존별 수수료 + loot당 사망확률 상승률. 프론트가 배당을 표시한다.</summary>
+    public IReadOnlyList<ZoneInfoDto> GetZones() =>
+    [
+        new(RaidZone.Low, EntryFee(RaidZone.Low), ZoneConfig[RaidZone.Low].DeathIncBps),
+        new(RaidZone.Med, EntryFee(RaidZone.Med), ZoneConfig[RaidZone.Med].DeathIncBps),
+        new(RaidZone.High, EntryFee(RaidZone.High), ZoneConfig[RaidZone.High].DeathIncBps),
+    ];
 
     /// <summary>존 가중치로 rarity 하나를 뽑는다(Random.Shared). weight=0인 등급은 뽑히지 않는다.</summary>
     private static string RollRarity(int[] weights)
@@ -1269,6 +1289,21 @@ public sealed class MarketRepository(
                 new { playerId }, tx);
             if (existing is not null)
                 throw new DomainException(ErrorCode.RaidActive, "이미 진행 중인 레이드가 있습니다.");
+
+            // 1.5) 출격 수수료 차감(캡 싱크). 잔액 부족이면 출격 거부(롤백 — at-risk를 걷지 않는다).
+            var fee = EntryFee(zone);
+            if (fee > 0)
+            {
+                var balance = await db.ExecuteScalarAsync<long>(
+                    "SELECT balance FROM wallet WHERE player_id = @playerId FOR UPDATE", new { playerId }, tx);
+                if (balance < fee)
+                    throw new DomainException(ErrorCode.InsufficientFunds,
+                        $"출격 수수료 {fee} 캡이 필요합니다(보유 {balance}).");
+                var after = balance - fee;
+                await db.ExecuteAsync("UPDATE wallet SET balance = @after WHERE player_id = @playerId",
+                    new { after, playerId }, tx);
+                await InsertLedgerAsync(db, tx, playerId, -fee, after, WalletLedgerReason.RaidEntryFee, null);
+            }
 
             // 2) 위험(at-risk) 대상 수집 = 스태시 밖 전부: 장착 슬롯(전부) + 장착된 백팩/리그의
             //    중첩 그리드 내용 + 주머니(POCKETS). 장착 인스턴스(+백팩/리그 자체)와 그 안의 내용물,

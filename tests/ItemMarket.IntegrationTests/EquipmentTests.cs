@@ -109,6 +109,9 @@ public class EquipmentTests(MarketAppFixture f)
         await db.ExecuteAsync(
             "DELETE FROM stash_placement WHERE player_id = @p AND container IN ('POCKETS','CONTAINER')",
             new { p = player });
+        // 출격 수수료(캡 싱크) 도입 후 반복 출격이 잔액을 소진하므로 잔액을 넉넉히 리셋한다.
+        await db.ExecuteAsync(
+            "UPDATE wallet SET balance = 100000 WHERE player_id = @p", new { p = player });
     }
 
     // ----------------------------------------------------------------------

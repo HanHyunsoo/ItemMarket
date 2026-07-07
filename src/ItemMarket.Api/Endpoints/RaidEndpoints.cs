@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using ItemMarket.Contracts.Raid;
 using ItemMarket.Grains.Abstractions;
+using ItemMarket.Grains.Data;
 using static ItemMarket.Api.Infrastructure.ApiResults;
 
 namespace ItemMarket.Api.Endpoints;
@@ -23,6 +24,9 @@ public static class RaidEndpoints
         // 레이드 이력: 해결된(EXTRACTED/DIED) 과거 세션(아이템 스냅샷 포함), 최신순 페이지네이션.
         api.MapGet("/history", (ClaimsPrincipal u, IGrainFactory gf, int page = 1, int size = 20) =>
             Exec(() => gf.GetGrain<IRaidSessionGrain>(CurrentPlayer(u)).GetHistory(page, size)));
+
+        // 존 메타: 존별 출격 수수료·loot당 사망확률 상승률(출격 화면 배당 표시용).
+        api.MapGet("/zones", (MarketRepository repo) => Exec(() => Task.FromResult(repo.GetZones())));
 
         // 레이드 시작: 스태시 밖 전부(장비+주머니+중첩 컨테이너)를 위험(at-risk)으로 잠근다.
         // 존(zone)이 드롭 등급·사망확률 상승률을 결정한다(요청 바디 optional, 기본 Med).

@@ -46,6 +46,7 @@ public static class Enums
         WalletLedgerReason.Fee => "FEE",
         WalletLedgerReason.AdminAdjust => "ADMIN_ADJUST",
         WalletLedgerReason.StashUpgrade => "STASH_UPGRADE",
+        WalletLedgerReason.RaidEntryFee => "RAID_ENTRY_FEE",
         _ => "ADMIN_ADJUST"
     };
 
@@ -58,6 +59,7 @@ public static class Enums
         "FEE" => WalletLedgerReason.Fee,
         "ADMIN_ADJUST" => WalletLedgerReason.AdminAdjust,
         "STASH_UPGRADE" => WalletLedgerReason.StashUpgrade,
+        "RAID_ENTRY_FEE" => WalletLedgerReason.RaidEntryFee,
         _ => WalletLedgerReason.AdminAdjust
     };
 

@@ -68,6 +68,10 @@ public class RaidTests(MarketAppFixture f)
         await db.ExecuteAsync(
             "DELETE FROM stash_placement WHERE player_id = @p AND container IN ('POCKETS','CONTAINER')",
             new { p = player });
+        // 출격 수수료(캡 싱크) 도입 후 반복 출격이 잔액을 소진하므로, 레이드 테스트 셋업마다 잔액을
+        // 넉넉히 리셋해 수수료에 걸리지 않게 한다. (수수료 자체 검증 테스트는 이 뒤에 잔액을 덮어쓴다.)
+        await db.ExecuteAsync(
+            "UPDATE wallet SET balance = 100000 WHERE player_id = @p", new { p = player });
     }
 
     private static async Task ClearEquipment(HttpClient c)
@@ -612,6 +616,82 @@ public class RaidTests(MarketAppFixture f)
             new StringContent("{\"zone\":99}", System.Text.Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
         Assert.Equal(ErrorCode.ValidationError, (await Api<RaidSessionDto>(res)).Error!.Code);
+    }
+
+    // fun#5(recurring 싱크): 출격마다 존별 수수료가 잔액에서 차감되고 wallet_ledger(RAID_ENTRY_FEE)에 기록된다.
+    [Fact]
+    public async Task Start_raid_charges_zone_entry_fee()
+    {
+        var e = await _f.AuthedAs(Echo);
+        await ClearAtRisk(Echo);
+        await ClearEquipment(e);
+        await GrantStack(Echo, 24, 3);
+        await Stash(e);
+        await BringStackToPockets(e, 24, 3, 0);
+
+        // 잔액을 알려진 값으로.
+        await using (var db = new NpgsqlConnection(_f.ConnString))
+        {
+            await db.OpenAsync();
+            await db.ExecuteAsync("UPDATE wallet SET balance = 5000 WHERE player_id = @p", new { p = Echo });
+        }
+
+        // Med 존 출격 → 수수료 400 차감(기본값).
+        (await Start(e, RaidZone.Med)).EnsureSuccessStatusCode();
+
+        await using (var db = new NpgsqlConnection(_f.ConnString))
+        {
+            await db.OpenAsync();
+            var balance = await db.ExecuteScalarAsync<long>(
+                "SELECT balance FROM wallet WHERE player_id = @p", new { p = Echo });
+            Assert.Equal(4600, balance); // 5000 - 400
+            var feeRows = await db.ExecuteScalarAsync<long>(
+                "SELECT count(*) FROM wallet_ledger WHERE player_id = @p AND reason = 'RAID_ENTRY_FEE'",
+                new { p = Echo });
+            Assert.True(feeRows >= 1);
+        }
+        (await Die(e)).EnsureSuccessStatusCode(); // 정리
+    }
+
+    // fun#5: 수수료를 낼 캡이 부족하면 출격이 InsufficientFunds로 거부되고 세션이 생성되지 않는다(롤백).
+    [Fact]
+    public async Task Start_raid_rejected_when_cannot_afford_entry_fee()
+    {
+        var e = await _f.AuthedAs(Echo);
+        await ClearAtRisk(Echo);
+        await ClearEquipment(e);
+        await GrantStack(Echo, 24, 3);
+        await Stash(e);
+        await BringStackToPockets(e, 24, 3, 0);
+
+        await using (var db = new NpgsqlConnection(_f.ConnString))
+        {
+            await db.OpenAsync();
+            await db.ExecuteAsync("UPDATE wallet SET balance = 50 WHERE player_id = @p", new { p = Echo }); // Med 400 미만
+        }
+
+        var res = await Start(e, RaidZone.Med);
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        Assert.Equal(ErrorCode.InsufficientFunds, (await Api<RaidSessionDto>(res)).Error!.Code);
+
+        // 세션 미생성(롤백).
+        var snap = await Api<RaidSessionDto?>(await e.GetAsync("/api/raid"));
+        Assert.True(snap.Data is null || snap.Data.Status != RaidStatus.Active);
+    }
+
+    // fun#5: 존 메타 엔드포인트가 3존의 수수료·사망확률 상승률을 반환하고 고위험일수록 수수료가 크다.
+    [Fact]
+    public async Task Zones_endpoint_returns_fee_and_death_rate_per_zone()
+    {
+        var e = await _f.AuthedAs(Echo);
+        var zones = await Api<IReadOnlyList<ZoneInfoDto>>(await e.GetAsync("/api/raid/zones"));
+        Assert.True(zones.Success);
+        Assert.Equal(3, zones.Data!.Count);
+
+        var low = zones.Data.Single(z => z.Zone == RaidZone.Low);
+        var high = zones.Data.Single(z => z.Zone == RaidZone.High);
+        Assert.True(high.EntryFee > low.EntryFee);                      // 고위험=높은 진입 장벽
+        Assert.True(high.DeathChancePerLootBps > low.DeathChancePerLootBps);
     }
 
     // 원자성(best-effort 폴트 인젝션): 정산 도중 실패하면 전량 롤백된다.
