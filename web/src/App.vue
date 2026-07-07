@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from 'vue'
 import AppHeader from '@/components/AppHeader.vue'
+import GuideOverlay from '@/components/GuideOverlay.vue'
 import { useCatalogStore } from '@/stores/catalog'
 import { useAuthStore } from '@/stores/auth'
+import { useTour } from '@/composables/useTour'
 import { toastError } from '@/utils/toast'
 import { restartConnection, stopConnection } from '@/realtime/marketHub'
 
 const catalog = useCatalogStore()
 const auth = useAuthStore()
+const tour = useTour()
 
 // Catalog is public seed data; load eagerly if already signed in so pages
 // render sprites/names immediately. If not signed in yet, views load on demand.
@@ -29,6 +32,16 @@ watch(
   (id) => {
     if (id) void restartConnection()
     else void stopConnection()
+  },
+  { immediate: true },
+)
+
+// 첫 로그인(또는 새로고침 시 이미 로그인) 후 첫 방문이면 가이드 투어를 연다.
+// 로그인 게이트 뒤에서 열리지 않도록 인증 상태가 참일 때만.
+watch(
+  () => auth.isAuthenticated,
+  (authed) => {
+    if (authed) tour.openIfFirstVisit()
   },
   { immediate: true },
 )
@@ -56,6 +69,7 @@ onUnmounted(() => {
       </div>
       <router-view v-else />
     </main>
+    <GuideOverlay v-if="auth.isAuthenticated" />
   </div>
 </template>
 

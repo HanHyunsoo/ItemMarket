@@ -1,8 +1,11 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { tourSeen } from '@/composables/useTour'
 
 const routes: RouteRecordRaw[] = [
-  { path: '/', redirect: { name: 'market' } },
+  // 첫 방문(가이드 미시청)은 핵심 루프인 출격 화면으로 유도한다(빈 오더북부터 보지 않도록).
+  // 이후 방문은 기존대로 마켓 랜딩.
+  { path: '/', redirect: () => ({ name: tourSeen() ? 'market' : 'raid' }) },
   {
     path: '/market',
     name: 'market',

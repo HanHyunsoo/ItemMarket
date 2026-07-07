@@ -374,3 +374,8 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       Top-N 밖이어도 "N위 / 전체 M명" 배너로 표시하고, Top-N 안이면 본인 행을 강조. 생환 0회면 순위 미정.
       순위 계산은 "나보다 앞선 수 + 1"(Top-N과 동일 정렬 기준). (`GetLeaderboardAsync`, `LeaderboardView.vue`,
       회귀 테스트 2종)
+- [x] **최종 QA fun#5 — 첫 화면 Raid 유도 + 튜토리얼** 첫 진입이 빈 오더북(Market)이고 튜토리얼이 없어
+      신규 이탈 위험이 컸다. (a) 첫 방문(가이드 미시청)은 `/`가 핵심 루프인 출격(`/raid`)으로 리다이렉트,
+      (b) 5단계 가이드 오버레이(`GuideOverlay`)가 루프(출격→탈출/사망→거래→성장·순위)를 안내하고 마지막
+      "지금 출격하기" CTA로 곧장 출격, (c) 헤더 "? 가이드" 버튼으로 언제든 재열람. localStorage(`wx.tour.v1`)로
+      1회성 노출 + #6 마켓 스트립과 키 통일(중복 방지). (`useTour.ts`, `GuideOverlay.vue`, `router`, `App.vue`, `AppHeader.vue`)

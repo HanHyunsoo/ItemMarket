@@ -8,6 +8,9 @@ import { SEED_PLAYERS } from '@/api/types'
 import { caps } from '@/utils/format'
 import { toastError, toastSuccess } from '@/utils/toast'
 import { onWalletChanged } from '@/realtime/marketHub'
+import { useTour } from '@/composables/useTour'
+
+const tour = useTour()
 
 const auth = useAuthStore()
 const { isAdmin, isAuthenticated, playerId } = storeToRefs(auth)
@@ -106,6 +109,15 @@ function go(name: string) {
       <div v-else class="nav" />
 
       <div class="player">
+        <button
+          v-if="isAuthenticated"
+          class="guide-open mono"
+          title="가이드 다시 보기"
+          @click="tour.open()"
+        >
+          ? 가이드
+        </button>
+
         <div
           v-if="isAuthenticated && balance !== null"
           class="caps-chip mono"
@@ -271,6 +283,24 @@ function go(name: string) {
   align-items: center;
   gap: 12px;
   flex: none;
+}
+.guide-open {
+  padding: 5px 11px;
+  border: 1px solid var(--wx-border);
+  border-radius: 999px;
+  background: none;
+  color: var(--wx-text-faint);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+.guide-open:hover {
+  color: var(--wx-amber-bright);
+  border-color: var(--wx-amber-bright);
 }
 .caps-chip {
   display: flex;
