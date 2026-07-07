@@ -260,8 +260,8 @@ export interface LeaderboardDto {
   topExtractions: LeaderEntryDto[]
 }
 
-// 출격 존(리스크/보상 티어). 드롭 rarity 가중치와 loot당 사망확률 상승률을 함께 결정한다.
-export type RaidZone = 'Low' | 'Med' | 'High'
+// 출격 존(리스크/보상 티어). Scav는 무료 재기 티어. 드롭 rarity 가중치·loot당 사망확률·수수료를 결정.
+export type RaidZone = 'Scav' | 'Low' | 'Med' | 'High'
 
 export interface StartRaidRequest {
   zone: RaidZone

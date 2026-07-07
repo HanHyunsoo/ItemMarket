@@ -51,6 +51,7 @@ const resolving = ref(false)
 
 // 출격 존 선택(리스크/보상 티어). 드롭 등급·loot당 사망확률 상승률을 결정한다.
 const ZONES: { key: RaidZone; label: string; hint: string }[] = [
+  { key: 'Scav', label: 'Scav · 무료', hint: '무료 재기 · 최저 드롭' },
   { key: 'Low', label: 'Low · 저위험', hint: '하급 드롭 · 사망확률 완만' },
   { key: 'Med', label: 'Med · 중위험', hint: '균형 드롭 · 표준 위험' },
   { key: 'High', label: 'High · 고위험', hint: '상급 드롭 · 사망확률 급상승' },

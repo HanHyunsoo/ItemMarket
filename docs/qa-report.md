@@ -250,7 +250,10 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 - [x] **NPC 벤더 매입(캡 faucet)** (재검증·상) 캡 faucet 부재로 인한 만성 디플레 + 잡템 실현 격차 해소 —
       `POST /api/market/vendor/sell`로 보유 아이템을 벤더가(base×0.85)에 즉시 판매해 캡 발행(스택 차감/유니크
       소각). 캡 불변식을 monitored faucet/sink로 재정의. `InventoryView`에 벤더 판매 버튼. 회귀 테스트 2종.
-      (`MarketRepository.VendorSellAsync`, `InventoryView.vue`) — 무료 scav 티어는 향후.
+      (`MarketRepository.VendorSellAsync`, `InventoryView.vue`).
+- [x] **무료 Scav 티어** (재검증·중) 파산(수수료 낼 캡 없음+재고 없음) 시 영구 고착을 여는 온램프 —
+      무료 Scav 존(수수료 0·최저 드롭·저EV) 추가로 잔액 0에서도 출격→루팅→벤더 판매로 재기. 남용은
+      저EV로 억제. (`MarketRepository.ZoneConfig`, `RaidView.vue`)
 - [x] **High 존 EV 리밸런싱** (재검증·상) High가 전 구간 EV 음수로 Med에 지배당하던 문제 — 수수료
       1000→600·기본사망 12%→10%·loot당 20%→15% 완화. EV 재검산: High 최대 +584(≈3루팅) > Med +491(≈4루팅)
       → 지배 역전(짧고 굵게=진짜 고위험 고보상). 드롭 가중치 유지. (`MarketRepository.ZoneConfig`, `appsettings`)
