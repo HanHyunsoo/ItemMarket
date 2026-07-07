@@ -65,6 +65,10 @@ function zoneDeathPct(z: RaidZone): number | null {
   const bps = zoneMeta.value.get(z)?.deathChancePerLootBps
   return bps == null ? null : bps / 100
 }
+function zoneBasePct(z: RaidZone): number | null {
+  const bps = zoneMeta.value.get(z)?.baseDeathBps
+  return bps == null ? null : bps / 100
+}
 
 // prep | active | outcome — drives which panel shows.
 const mode = computed<'prep' | 'active' | 'outcome'>(() => {
@@ -380,7 +384,9 @@ function goGear(): void {
               <span class="zone-name">{{ z.label }}</span>
               <span class="zone-hint">{{ z.hint }}</span>
               <span v-if="zoneFee(z.key) !== null" class="zone-stats">
-                수수료 {{ caps(zoneFee(z.key)) }} 캡 · 사망 +{{ zoneDeathPct(z.key)?.toFixed(0) }}%/루팅
+                수수료 {{ caps(zoneFee(z.key)) }} 캡 · 기본 사망 {{ zoneBasePct(z.key)?.toFixed(0) }}% · +{{
+                  zoneDeathPct(z.key)?.toFixed(0)
+                }}%/루팅
               </span>
             </button>
           </div>

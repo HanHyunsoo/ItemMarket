@@ -272,6 +272,7 @@ export interface ZoneInfoDto {
   zone: RaidZone
   entryFee: number
   deathChancePerLootBps: number
+  baseDeathBps: number
 }
 
 // 루팅 결과: 서버가 세션 존의 rarity 가중치로 무엇을·얼마나 드롭할지 결정한다. 이번 획득(dropped)과
