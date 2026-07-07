@@ -144,6 +144,8 @@ append-only 원장으로 회계하고 고부하 동시성에서 **돈·아이템
 | ![Records](docs/screenshots/records.png) | ![Item detail](docs/screenshots/item-detail.png) |
 | **지갑** — 잔액 + append-only 원장 | **운영(GM) 콘솔** — admin 전용 |
 | ![Wallet](docs/screenshots/wallet.png) | ![Admin](docs/screenshots/admin.png) |
+| **출격(Raid)** — 존 선택(수수료·사망확률)+at-risk 매니페스트 | **리더보드** — 최다 순자산·최다 생환 |
+| ![Raid](docs/screenshots/raid.png) | ![Leaderboard](docs/screenshots/leaderboard.png) |
 | **Swagger** — OpenAPI 문서 | |
 | ![Swagger](docs/screenshots/swagger.png) | |
 

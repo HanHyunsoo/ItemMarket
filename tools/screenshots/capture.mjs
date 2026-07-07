@@ -92,6 +92,17 @@ const run = async () => {
   await page.locator('.wx-panel.raid-card').first().waitFor({ state: 'visible', timeout: 15000 })
   await shot(page, 'records.png')
 
+  // 6) Raid deploy (prep) — zone select with fee/death-rate + at-risk manifest.
+  await goto(page, '/raid')
+  await page.locator('.zone-chip, .deploy-btn').first().waitFor({ state: 'visible', timeout: 15000 })
+  await wait(400)
+  await shot(page, 'raid.png')
+
+  // 7) Leaderboard — top net worth + top extractions.
+  await goto(page, '/leaderboard')
+  await page.locator('.board-list').first().waitFor({ state: 'visible', timeout: 15000 })
+  await shot(page, 'leaderboard.png')
+
   // ---- Switch to Trader_Charlie (admin) ----
   await selectPlayer(page, 'Trader_Charlie')
   await page.locator('.nav-btn.admin').first().waitFor({ state: 'visible', timeout: 15000 })
