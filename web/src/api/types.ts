@@ -378,8 +378,21 @@ export interface MarketTickerDto {
   lastPrice: number | null
   lastTradeAt: string | null
   openOrders: number
-  vendorBid: number // base_value 기반 벤더 참고 매수가(실거래 아님)
-  vendorAsk: number // base_value 기반 벤더 참고 매도가
+  vendorBid: number // 벤더 매입가(base_value×0.85) — 실제 판매 가능
+  vendorAsk: number // 벤더 참고 매도가
+}
+
+// NPC 벤더 매입 요청/결과. 스택이면 templateId+quantity, 유니크면 instanceId.
+export interface VendorSellRequest {
+  kind: StashItemKind
+  templateId?: number | null
+  quantity?: number | null
+  instanceId?: string | null
+}
+export interface VendorSellResultDto {
+  unitPrice: number
+  proceeds: number
+  balance: number
 }
 
 export interface PlaceOrderResult {

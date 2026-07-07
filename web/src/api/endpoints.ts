@@ -32,6 +32,8 @@ import type {
   TokenResponse,
   TradeDto,
   UnequipRequest,
+  VendorSellRequest,
+  VendorSellResultDto,
   WalletDto,
   WalletLedgerEntryDto,
 } from './types'
@@ -99,6 +101,8 @@ export const marketApi = {
   book: (templateId: number) => api.get<OrderBookSnapshotDto>(`/api/market/${templateId}/book`),
   trades: (templateId: number, page: number, size: number) =>
     api.get<PagedResult<TradeDto>>(`/api/market/${templateId}/trades`, { page, size }),
+  vendorSell: (body: VendorSellRequest) =>
+    api.post<VendorSellResultDto>('/api/market/vendor/sell', body),
 }
 
 export const leaderboardApi = {
