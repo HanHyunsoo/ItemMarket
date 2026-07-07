@@ -952,8 +952,10 @@ public sealed class MarketRepository(
     public async Task<IReadOnlyList<MarketTickerDto>> GetTickersAsync()
     {
         await using var db = Open();
+        // base_value ± 스프레드로 벤더 참고가(vendor_bid/ask)를 함께 낸다 — 실제 주문/매칭/경제와 무관한
+        // 순수 참고가로, 플레이어 호가가 없는 종목의 "죽은 첫 화면"을 카드에서 시각적으로 해소한다.
         var rows = await db.QueryAsync(
-            @"SELECT t.id AS template_id,
+            $@"SELECT t.id AS template_id,
                 (SELECT MAX(unit_price) FROM market_order o
                    WHERE o.template_id = t.id AND o.side = 'BUY'
                      AND o.status IN ('OPEN','PARTIALLY_FILLED')) AS best_bid,
@@ -964,13 +966,19 @@ public sealed class MarketRepository(
                    WHERE tr.template_id = t.id ORDER BY tr.executed_at DESC LIMIT 1) AS last_price,
                 (SELECT MAX(executed_at) FROM trade tr WHERE tr.template_id = t.id) AS last_trade_at,
                 (SELECT count(*) FROM market_order o
-                   WHERE o.template_id = t.id AND o.status IN ('OPEN','PARTIALLY_FILLED')) AS open_orders
+                   WHERE o.template_id = t.id AND o.status IN ('OPEN','PARTIALLY_FILLED')) AS open_orders,
+                GREATEST(1, floor(t.base_value * (10000 - {VendorSpreadBps}) / 10000)) AS vendor_bid,
+                GREATEST(1, ceil (t.base_value * (10000 + {VendorSpreadBps}) / 10000)) AS vendor_ask
               FROM item_template t
               ORDER BY t.id");
         return rows.Select(r => new MarketTickerDto(
             (int)r.template_id, (long?)r.best_bid, (long?)r.best_ask, (long?)r.last_price,
-            (DateTimeOffset?)r.last_trade_at, (int)r.open_orders)).ToList();
+            (DateTimeOffset?)r.last_trade_at, (int)r.open_orders,
+            (long)r.vendor_bid, (long)r.vendor_ask)).ToList();
     }
+
+    /// <summary>벤더 참고가 스프레드(bps). 매수=base×(1-s), 매도=base×(1+s). 참고 표시용(실거래 아님).</summary>
+    private const int VendorSpreadBps = 1500;
 
     // ======================================================================
     //  취소(에스크로 환불) — 한 트랜잭션

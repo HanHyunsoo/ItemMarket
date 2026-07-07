@@ -241,11 +241,12 @@ public class MarketFlowTests(MarketAppFixture f)
         Assert.NotNull(t.LastTradeAt);
         Assert.True(t.OpenOrders >= 2);      // 매도 잔여 + 매수40 잔여
 
-        // 활동 없는 종목은 전부 null·0("시장 없음").
+        // 활동 없는 종목은 실호가 전부 null·0("시장 없음")이지만, 벤더 참고가는 base_value 스프레드로 항상 존재.
         var dead = tickers.Data.First(x => x.OpenOrders == 0 && x.LastTradeAt == null);
         Assert.Null(dead.BestBid);
         Assert.Null(dead.BestAsk);
         Assert.Null(dead.LastPrice);
+        Assert.True(dead.VendorBid > 0 && dead.VendorAsk > dead.VendorBid); // 벤더 스프레드(참고가)
     }
 
     // fun#8: 리더보드 — 최다 캡은 잔액 내림차순, 최다 탈출은 EXTRACTED 세션 수. 공유 상태라 절대 순위

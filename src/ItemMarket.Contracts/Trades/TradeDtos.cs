@@ -28,4 +28,6 @@ public sealed record MarketTickerDto(
     long? BestAsk,
     long? LastPrice,
     DateTimeOffset? LastTradeAt,
-    int OpenOrders);
+    int OpenOrders,
+    long VendorBid,
+    long VendorAsk);
