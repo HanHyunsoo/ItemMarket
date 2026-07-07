@@ -254,6 +254,18 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 - [x] **무료 Scav 티어** (재검증·중) 파산(수수료 낼 캡 없음+재고 없음) 시 영구 고착을 여는 온램프 —
       무료 Scav 존(수수료 0·최저 드롭·저EV) 추가로 잔액 0에서도 출격→루팅→벤더 판매로 재기. 남용은
       저EV로 억제. (`MarketRepository.ZoneConfig`, `RaidView.vue`)
+- [x] **최종 QA ★★ — 장착 유니크 벤더 매입 가치 복제·소프트락** `VendorSellAsync`가 `item_instance`
+      소각 + `stash_placement`만 지워, 장착 아이템은 `player_equipment`에 남아 "캡 수령 + 장비 유지"
+      (가치 복제) 후 출격이 owner=NULL 인스턴스로 전량 롤백(소프트락)됐다. 유니크 매입 시 장착·내용물
+      있는 컨테이너를 거부하고, `GetEquipmentAsync`에 owner 필터 방어를 추가. 회귀 테스트 1종.
+      (`MarketRepository.cs`, `MarketFlowTests`)
+- [x] **최종 QA fun#2 — 파산 온램프 데드엔드** 잔액 0 + 인벤 전무면 어떤 존도 반입할 것이 없어 출격
+      불가라 재기 경로가 없었다. 무료 Scav에 한해 "빈손 출격(반입 0·획득만)"을 허용해 온램프를 연다.
+      (`MarketRepository.StartRaidAsync`, `RaidView.vue`, 회귀 테스트)
+- [x] **최종 QA fun#3 — Scav+벤더 무한 캡 faucet 유계화** Scav(무료·쿨다운 없음)+벤더 매입으로 순유입이
+      무한 초과할 수 있었다. 빈손 Scav를 **순자산 상한**(`Raid:ScavNetWorthCeiling`, 기본 1000)으로 게이트 —
+      벤더 판매는 순자산 불변이라 sell→재출격 루프로 못 뚫리고, 상한을 넘으면 빈손 Scav가 닫혀 유료 존
+      (수수료 sink)으로 졸업이 강제된다(총 무상 발행 ~상한으로 유계). 회귀 테스트 2종. (`MarketRepository.cs`)
 - [x] **High 존 EV 리밸런싱** (재검증·상) High가 전 구간 EV 음수로 Med에 지배당하던 문제 — 수수료
       1000→600·기본사망 12%→10%·loot당 20%→15% 완화. EV 재검산: High 최대 +584(≈3루팅) > Med +491(≈4루팅)
       → 지배 역전(짧고 굵게=진짜 고위험 고보상). 드롭 가중치 유지. (`MarketRepository.ZoneConfig`, `appsettings`)
