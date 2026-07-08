@@ -1,14 +1,18 @@
 using System.Net.Http.Json;
 using ItemMarket.Contracts.Admin;
+using ItemMarket.Contracts.Common;
 using ItemMarket.Contracts.Orders;
 using ItemMarket.Contracts.Wallet;
+using ItemMarket.Grains.Data;
 using Dapper;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Orleans;
 using Orleans.Runtime;
+using Orleans.Serialization;
 using Xunit;
 using static ItemMarket.IntegrationTests.MarketAppFixture;
+using ErrorCode = ItemMarket.Contracts.Common.ErrorCode; // Orleans.ErrorCode와 모호성 방지
 
 namespace ItemMarket.IntegrationTests;
 
@@ -85,5 +89,21 @@ public class CrashRecoveryTests(MarketAppFixture f)
         const long fee = cost * 500 / 10000; // 기본 fee_bps 500(5%)
         Assert.Equal(bBefore - cost, await Balance(buyer));
         Assert.Equal(sBefore + (cost - fee), await Balance(seller));
+    }
+
+    // M1: 그레인이 던진 DomainException이 실로 경계를 넘을 때 Code가 보존돼야 API가 도메인 코드→적절한
+    // HTTP를 매핑한다. [GenerateSerializer] 코덱을 Orleans Serializer로 직접 라운드트립해 증명한다
+    // (멀티실로 클러스터를 띄우지 않고도 직렬화 계약을 고정). 이게 없으면 다중 실로에서 500으로 강등됐다.
+    [Fact]
+    public void DomainException_roundtrips_through_orleans_serializer_preserving_code()
+    {
+        var ser = _f.Services.GetRequiredService<Serializer>();
+        var original = new DomainException(ErrorCode.InsufficientFunds, "잔액 부족");
+
+        var bytes = ser.SerializeToArray(original);
+        var back = ser.Deserialize<DomainException>(bytes);
+
+        Assert.Equal(ErrorCode.InsufficientFunds, back.Code); // 실로 경계 넘어도 도메인 코드 보존
+        Assert.Equal("잔액 부족", back.Message);
     }
 }

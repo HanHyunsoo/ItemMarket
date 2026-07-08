@@ -82,13 +82,16 @@
 
 ## Medium
 
-### M1. `DomainException.Code`가 실로 경계(원격) 직렬화에서 보존된다는 보장 없음 **[DEFERRED]**
+### M1. `DomainException.Code`가 실로 경계(원격) 직렬화에서 보존된다는 보장 없음 **[FIXED]**
 - **무엇**: co-host 단일 실로(현 개발/테스트 구성)에서는 grain 예외가 in-proc으로 전파되어 `Code`가
-  보존된다(회귀 테스트 `Buy_beyond_balance_fails_with_insufficient_funds`로 확인). 그러나
-  `run-cluster.sh`의 2-실로(adonet) 구성에서 grain이 **다른 실로**에 활성화되면 Orleans 예외 직렬화가
-  커스텀 프로퍼티 `Code`를 보존하지 못해 `ErrorCode.Unknown`/500으로 강등될 수 있다.
-- **제안**: `DomainException`에 Orleans 직렬화 지원을 명시(예: `[GenerateSerializer]` + Id 프로퍼티,
-  또는 grain 반환값을 결과 객체(Result 패턴)로 바꿔 예외를 경계 안에서만 사용). 멀티 실로 통합 테스트로 검증.
+  보존됐지만, `run-cluster.sh`의 2-실로(adonet) 구성에서 grain이 **다른 실로**에 활성화되면 Orleans 예외
+  직렬화가 커스텀 프로퍼티 `Code`를 보존하지 못해 `ErrorCode.Unknown`/500으로 강등될 수 있었다.
+- **원인**: `DomainException`이 Orleans 코덱 없이 JSON 폴백(`ItemMarket.*`) 대상이었는데, JSON은 무인자
+  생성자·set 접근자가 없는 `Exception`을 역직렬화할 수 없어 실로 경계에서 재구성에 실패.
+- **수정**: `DomainException`에 `[GenerateSerializer]` + `[Id(0)] Code` 부여(`DomainException.cs`), JSON
+  직렬화기 대상에서 `Exception` 파생 타입 제외(`OrleansHosting.cs`)해 생성 코덱이 `Code`를 실로 경계 너머로
+  보존하게 함. 회귀 테스트 `CrashRecoveryTests.DomainException_roundtrips_through_orleans_serializer_preserving_code`
+  가 Orleans `Serializer`로 직접 라운드트립해 `Code`·`Message` 보존을 고정(멀티실로 없이 직렬화 계약 검증).
 
 ### M2. 어드민 `status` 필터가 숫자 문자열을 통과시킴 **[FIXED]**
 - `Enum.TryParse("7")`은 정의되지 않은 값으로도 true → `ToDb` 기본값 "OPEN"으로 오필터링.

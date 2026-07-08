@@ -52,8 +52,12 @@ public static class OrleansHosting
         // Orleans 직렬화: 계약(Contracts) DTO는 공유 계약이라 [GenerateSerializer]를
         // 붙일 수 없다. grain 경계를 넘는 ItemMarket.* 타입은 JSON 직렬화기로 처리한다
         // (인프로세스 copier 포함). 계약을 수정하지 않고 코덱 부재 문제를 해결.
+        //   예외(Exception 파생)는 제외한다 — JSON은 무인자 생성자·set 접근자가 없는 Exception을
+        //   역직렬화할 수 없어, DomainException은 자체 [GenerateSerializer] 코덱으로 실로 경계를
+        //   넘겨 Code를 보존한다(M1). 이 제외가 없으면 JSON 경로가 선택돼 재구성에 실패한다.
         builder.Services.AddSerializer(sb => sb.AddJsonSerializer(
-            isSupported: t => t.Namespace is not null && t.Namespace.StartsWith("ItemMarket")));
+            isSupported: t => t.Namespace is not null && t.Namespace.StartsWith("ItemMarket")
+                              && !typeof(Exception).IsAssignableFrom(t)));
 
         return builder;
     }
