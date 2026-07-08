@@ -35,6 +35,8 @@ const inventory = ref<InventoryDto | null>(null)
 const loading = ref(false)
 const busy = ref(false)
 const slotHover = ref<EquipSlot | null>(null)
+// 드래그 중인 아이템이 hover 중인 슬롯에 착용 가능한지(초록/빨강 하이라이트 판정).
+const slotHoverValid = ref(false)
 
 // ── 창고 확장(캡 싱크): +6행 구매. 가격은 백엔드와 동일한 점증 공식으로 미리 보여준다. ──
 const STASH_MAX = 500
@@ -158,14 +160,27 @@ async function onMove(e: {
 }
 
 // ---- equip by dropping a compatible instance onto a slot ----
+// 슬롯에 착용 가능한 드래그인지: 유니크 인스턴스여야 하고, 템플릿의 equip_slot이 이 슬롯과 일치하고,
+// 슬롯이 비어 있어야 한다(서버 검증과 동일 규칙 — 클라에서 미리 초록/빨강으로 표시).
+function draggedFitsSlot(slot: EquipSlot): boolean {
+  const p = activeDrag.value?.placement
+  if (!p || p.kind !== 'Instance') return false
+  if (equippedIn(slot)) return false
+  return catalog.get(p.templateId)?.equipSlot === slot
+}
 function onSlotDragOver(e: DragEvent, slot: EquipSlot): void {
   if (!activeDrag.value) return
   e.preventDefault()
   slotHover.value = slot
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  slotHoverValid.value = draggedFitsSlot(slot)
+  // 착용 불가면 커서도 '금지'로 — 드롭해도 서버가 거부한다.
+  if (e.dataTransfer) e.dataTransfer.dropEffect = slotHoverValid.value ? 'move' : 'none'
 }
 function onSlotDragLeave(slot: EquipSlot): void {
-  if (slotHover.value === slot) slotHover.value = null
+  if (slotHover.value === slot) {
+    slotHover.value = null
+    slotHoverValid.value = false
+  }
 }
 
 async function onSlotDrop(slot: EquipSlot): Promise<void> {
@@ -288,7 +303,11 @@ function inspectSlot(slot: EquipSlot): void {
               v-for="s in SINGLE_SLOTS"
               :key="s.slot"
               class="slot"
-              :class="{ hover: slotHover === s.slot, filled: !!equippedIn(s.slot) }"
+              :class="{
+                hover: slotHover === s.slot && slotHoverValid,
+                bad: slotHover === s.slot && !slotHoverValid,
+                filled: !!equippedIn(s.slot),
+              }"
               :title="s.label"
               @dragover="onSlotDragOver($event, s.slot)"
               @dragleave="onSlotDragLeave(s.slot)"
@@ -497,6 +516,12 @@ function inspectSlot(slot: EquipSlot): void {
 .slot.hover {
   border-color: var(--wx-buy);
   background: rgba(109, 176, 106, 0.14);
+}
+.slot.bad {
+  border-color: var(--wx-sell);
+  border-style: solid;
+  background: rgba(203, 88, 88, 0.14);
+  cursor: not-allowed;
 }
 .slot-ghost {
   width: 40px;
