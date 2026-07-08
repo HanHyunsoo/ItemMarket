@@ -44,6 +44,14 @@ const spread = computed(() =>
   bestBid.value !== null && bestAsk.value !== null ? bestAsk.value - bestBid.value : null,
 )
 
+// 호가창 래더 클릭 → 그 가격에 반대 주문을 채워 바로 교차 체결하게 한다(거래소 표준 UX).
+//   매도(ask) 클릭 = 그 가격에 "매수", 매수(bid) 클릭 = 그 가격에 "매도".
+function takeLevel(side: OrderSide, price: number, qty: number): void {
+  form.side = side
+  form.unitPrice = price
+  if (!(isUnique.value && side === 'Sell')) form.quantity = qty
+}
+
 // Depth bars: widest row = deepest level on either side of the book.
 const maxDepth = computed(() => {
   const qtys = [
@@ -251,6 +259,8 @@ function instanceLabel(i: ItemInstanceDto): string {
               :key="'b' + lvl.unitPrice"
               class="lvl bid"
               :style="{ '--depth': depthPct(lvl.quantity) + '%' }"
+              title="이 매수 호가에 매도 넣기"
+              @click="takeLevel('Sell', lvl.unitPrice, lvl.quantity)"
             >
               <span class="wx-muted">{{ lvl.orderCount }}</span>
               <span>{{ lvl.quantity }}</span>
@@ -266,6 +276,8 @@ function instanceLabel(i: ItemInstanceDto): string {
               :key="'a' + lvl.unitPrice"
               class="lvl ask"
               :style="{ '--depth': depthPct(lvl.quantity) + '%' }"
+              title="이 매도 호가에 매수 넣기 (클릭 → 바로 체결)"
+              @click="takeLevel('Buy', lvl.unitPrice, lvl.quantity)"
             >
               <span class="px wx-sell">{{ caps(lvl.unitPrice) }}</span>
               <span>{{ lvl.quantity }}</span>
@@ -556,6 +568,12 @@ function instanceLabel(i: ItemInstanceDto): string {
 .lvl {
   position: relative;
   border-radius: 2px;
+  cursor: pointer;
+  transition: filter 0.1s ease;
+}
+.lvl:hover {
+  filter: brightness(1.5);
+  outline: 1px solid var(--wx-border-strong);
 }
 /* depth bar: bids grow right-to-left, asks left-to-right */
 .lvl.bid {
