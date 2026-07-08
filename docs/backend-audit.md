@@ -172,8 +172,8 @@
 각 항목 **문제 → 수정** 한 줄 요약(상세 근거·수치는 `docs/perf-report.md`, 계약은 `docs/api-contract.md`).
 
 - **교차-grain 지갑 락 순서 데드락(40P01)** — 서로 다른 아이템 grain의 동시 정산이 같은 지갑 행을 다른
-  순서로 잠가 Postgres 데드락 → 정산 tx 시작에 지갑 행을 `ORDER BY player_id FOR UPDATE`로 일관 순서
-  선점(락 순서화). p99 973→175ms, 데드락 0.
+  순서로 잠가 Postgres 데드락 → 정산 tx 시작에 지갑 행을 player_id 오름차순으로 일관 선점(락 순서화).
+  p99 973→175ms, 데드락 0. (이후 락 획득이 플랜에 의존하지 않도록 C# 정렬 + 개별 `FOR UPDATE` 문장으로 하드닝.)
 - **그리드 유니크 제약 버그** — 스택용 `(player, template)` 유니크 제약이 인스턴스 행에도 적용돼 같은
   무기 2정 배치 시 `duplicate key` → **STACK 전용 부분 유니크 인덱스**(`WHERE kind='STACK'`, 컨테이너
   포함)로 교정.
