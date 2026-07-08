@@ -43,8 +43,7 @@ builder.Services.AddSingleton(new MarketRepository(
     cfg.GetValue("Stash:UpgradeStep", 1000L),
     cfg.GetValue("Raid:EntryFee:Low", 150L),
     cfg.GetValue("Raid:EntryFee:Med", 400L),
-    cfg.GetValue("Raid:EntryFee:High", 1000L),
-    cfg.GetValue("Raid:ScavNetWorthCeiling", 1000L)));
+    cfg.GetValue("Raid:EntryFee:High", 1000L)));
 
 // 매칭 엔진 옵션 — 가격 밴드 샤딩 스위치(Market:PriceBandSize, 기본 0=비활성).
 // 0이면 OrderBookGrain이 기존과 동일하게 템플릿당 단일 호가창을 직접 매칭한다.

@@ -680,7 +680,7 @@ public class RaidTests(MarketAppFixture f)
         Assert.True(snap.Data is null || snap.Data.Status != RaidStatus.Active);
     }
 
-    // 파산 온램프: 잔액 0이어도 무료 Scav 존은 출격 가능(유료 존은 거부). 재기 경로.
+    // 무료 최저 티어: 잔액 0이어도 (반입할 아이템만 있으면) 무료 Scav 존은 출격 가능(유료 존은 수수료로 거부).
     [Fact]
     public async Task Scav_zone_deploys_free_even_when_broke()
     {
@@ -702,62 +702,12 @@ public class RaidTests(MarketAppFixture f)
         Assert.Equal(HttpStatusCode.BadRequest, med.StatusCode);
         Assert.Equal(ErrorCode.InsufficientFunds, (await Api<RaidSessionDto>(med)).Error!.Code);
 
-        // Scav는 무료라 출격 성공(온램프).
+        // Scav는 수수료 0이라 잔액 0에도 출격 성공.
         var scav = await Api<RaidSessionDto>(await Start(e, RaidZone.Scav));
         Assert.True(scav.Success);
         Assert.Equal(RaidStatus.Active, scav.Data!.Status);
 
         (await Die(e)).EnsureSuccessStatusCode(); // 정리
-    }
-
-    // fun#2 온램프: 진짜 파산자(잔액 0 + 인벤 전무, 순자산 0)는 Scav를 "빈손 출격(반입 0·획득만)"으로
-    // 언제나 재기할 수 있다. 유료 존은 반입할 것이 없어 여전히 거부된다.
-    [Fact]
-    public async Task Scav_empty_handed_onramp_when_broke_and_empty()
-    {
-        var e = await _f.AuthedAs(Echo);
-        await ClearAtRisk(Echo);
-        await ClearEquipment(e);
-        // 완전 파산: 스택·소유 인스턴스·배치 전부 제거 + 잔액 0 → 순자산 0.
-        await using (var db = new NpgsqlConnection(_f.ConnString))
-        {
-            await db.OpenAsync();
-            await db.ExecuteAsync("DELETE FROM stash_placement WHERE player_id = @p", new { p = Echo });
-            await db.ExecuteAsync("DELETE FROM inventory_stack WHERE player_id = @p", new { p = Echo });
-            await db.ExecuteAsync("DELETE FROM player_equipment WHERE player_id = @p", new { p = Echo });
-            await db.ExecuteAsync("UPDATE item_instance SET owner_player_id = NULL WHERE owner_player_id = @p", new { p = Echo });
-            await db.ExecuteAsync("UPDATE wallet SET balance = 0 WHERE player_id = @p", new { p = Echo });
-        }
-
-        // 유료 존(Low)은 파산자에게 온램프가 아니다 — 수수료조차 못 내 거부(빈손 온램프는 Scav 전용).
-        var low = await Start(e, RaidZone.Low);
-        Assert.Equal(HttpStatusCode.BadRequest, low.StatusCode);
-        Assert.Equal(ErrorCode.InsufficientFunds, (await Api<RaidSessionDto>(low)).Error!.Code);
-
-        // 빈손 Scav 출격 성공(온램프) — 반입 0이어도 파산+Scav면 허용.
-        var scav = await Api<RaidSessionDto>(await Start(e, RaidZone.Scav));
-        Assert.True(scav.Success);
-        Assert.Equal(RaidStatus.Active, scav.Data!.Status);
-
-        // 획득만 가능: 루팅 후 결정론 탈출로 재기(캡·아이템 확보).
-        (await Scavenge(e)).EnsureSuccessStatusCode();
-        await ResetDeathChance(Echo);
-        (await Extract(e)).EnsureSuccessStatusCode();
-    }
-
-    // fun#3 faucet 유계: 순자산이 상한 이상이면 빈손 Scav가 닫힌다(유료 존으로 졸업 강제).
-    // 벤더 판매는 인벤→캡 전환일 뿐 순자산 불변이라 sell→재출격 루프로도 온램프를 재개할 수 없다.
-    [Fact]
-    public async Task Scav_empty_handed_rejected_when_net_worth_above_ceiling()
-    {
-        var e = await _f.AuthedAs(Echo);
-        await ClearAtRisk(Echo);   // 잔액 100000, POCKETS/CONTAINER 비움 → 순자산 ≥ 상한
-        await ClearEquipment(e);   // 장비 비움 → at-risk 수집 0(반입할 것 없음)
-
-        // 순자산 100000 ≥ 상한 1000 + 반입 0 → 빈손 Scav도 거부.
-        var scav = await Start(e, RaidZone.Scav);
-        Assert.Equal(HttpStatusCode.BadRequest, scav.StatusCode);
-        Assert.Equal(ErrorCode.RaidNothingToDeploy, (await Api<RaidSessionDto>(scav)).Error!.Code);
     }
 
     // fun#5: 존 메타 엔드포인트가 전 존의 수수료·사망확률 상승률을 반환하고 고위험일수록 수수료가 크다.

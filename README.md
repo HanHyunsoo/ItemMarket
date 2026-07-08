@@ -12,7 +12,7 @@ SQL 불변식으로 증명**합니다. 실시간 호가/체결 푸시는 SignalR
 얇게 붙였습니다 — 레이드로 아이템이 유입되고, 수수료·사망·확장으로 소각돼 거래에 판돈이 생깁니다.
 
 `C# / .NET 10` · `Orleans` · `PostgreSQL` · `SignalR` · `Redis` · `Vue 3` ·
-**테스트 125개** · **부하 테스트로 데드락 발견 → p99 5.5× 개선**
+**테스트 123개** · **부하 테스트로 데드락 발견 → p99 5.5× 개선**
 
 > 평가자용 3줄 요약: (1) 매칭 동시성을 Orleans 단일 활성화로 **락 없이** 해결하고 "동시 매수 8건 →
 > 1건만 체결"을 테스트로 고정. (2) 에스크로 + 단일 트랜잭션 정산으로 이중판매·복제·무한발행을 차단하고
@@ -61,7 +61,7 @@ SQL 불변식으로 증명**합니다. 실시간 호가/체결 푸시는 SignalR
   전이를 각각 단일 Postgres 트랜잭션으로 정산, 총량 보존·스태시 불가침을 불변식 테스트로 고정.
 - **설계 판단 · 트레이드오프** — "MSA 대신 Orleans", "Orleans Tx 대신 DB Tx", "fungible엔 per-unit
   UUID를 안 붙이는 이유" 등을 **근거와 함께** 선택·문서화.
-- **품질 · 운영** — Testcontainers 기반 통합 테스트 우선(총 125개) · CI · Docker 한 방 실행 · Swagger ·
+- **품질 · 운영** — Testcontainers 기반 통합 테스트 우선(총 123개) · CI · Docker 한 방 실행 · Swagger ·
   어드민 GM 툴 · 풀스택(Vue 3).
 
 > 면접용 Q&A·STAR 스토리·화이트보드 요약: **[`docs/interview-prep.md`](docs/interview-prep.md)**
@@ -226,8 +226,8 @@ stateDiagram-v2
   주머니. **착용 장비만 있어도 출격 가능**. **스태시(안전)는 절대 at-risk가 아님**. 매도 에스크로의
   "자산 잠금"을 그대로 재사용한다.
 - **리스크/보상 존**: 출격 시 **Scav/Low/Med/High** 선택 — 존이 서버 드롭테이블의 rarity 가중치, loot당
-  사망확률 상승률, 기본 사망확률(floor), 출격 수수료를 함께 결정. 무료 **Scav**는 파산 재기 온램프(순자산
-  상한으로 게이트해 무한 faucet 방지). 루팅은 서버가 존 가중치로 롤(클라 무한 인플레 차단).
+  사망확률 상승률, 기본 사망확률(floor), 출격 수수료를 함께 결정. 무료 **Scav**는 최저 EV·최저 드롭의
+  재기용 진입 티어(수수료 0). 루팅은 서버가 존 가중치로 롤(클라 무한 인플레 차단).
 - **불변식**: 탈출은 **반입 자산을 출격 전 자리 그대로 복원**하고 전리품을 귀속(총량 보존), 사망은
   at-risk만 소실하고 **스태시는 불가침**. 모든 이동은 append-only `item_ledger`로 프로비넌스 회계.
   통합 테스트로 고정.
@@ -256,7 +256,7 @@ cd web && npm install && npm run dev         # Web http://localhost:5173
 ./scripts/seed-market.sh && ./scripts/seed-trades.sh
 
 # 테스트 (Docker만 있으면 됨 — 일회용 Postgres 자동)
-dotnet test                                  # 125개: 단위 41 + 통합 80 + 밴딩 4
+dotnet test                                  # 123개: 단위 41 + 통합 78 + 밴딩 4
 
 # 다중 실로 + Redis 실시간 데모
 ./scripts/run-cluster.sh
