@@ -124,7 +124,7 @@ sequenceDiagram
   DB-->>OB: COMMIT (원자)
   OB-->>API: 체결 내역 + 잔여
   deactivate OB
-  API-->>Hub: BookChanged · TradePrinted · WalletChanged
+  API-->>Hub: OrderBookUpdated · TradeExecuted · WalletChanged
   Hub-->>Buyer: 실시간 반영 (리로드 없음)
 ```
 
