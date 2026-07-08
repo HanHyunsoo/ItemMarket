@@ -38,15 +38,21 @@ public sealed class MarketNotifier(IHubContext<MarketHub> hub, ILogger<MarketNot
             var tmplGroup = MarketGroups.Template(snapshot.ItemTemplateId);
             await hub.Clients.Group(tmplGroup).SendAsync("OrderBookUpdated", snapshot);
 
+            // TradeExecuted는 체결마다 서로 다른 데이터라 per-fill로 발행한다.
+            // 반면 WalletChanged는 값 없는 "재조회 힌트"라 같은 유저에게 여러 번 보내면
+            // 클라가 GET /api/wallet 를 그만큼 중복 재조회한다(멀티필 시 신호 폭발).
+            // 그래서 이번 활동으로 지갑/에스크로가 변동된 유저를 집합으로 모아
+            // per-order로 딱 한 번씩만 보낸다(actingPlayer 포함, 중복 제거).
+            var affected = new HashSet<Guid> { actingPlayerId };
             foreach (var fill in fills)
             {
                 await hub.Clients.Group(MarketGroups.Template(fill.ItemTemplateId)).SendAsync("TradeExecuted", fill);
-                await hub.Clients.Group(MarketGroups.User(fill.BuyerId)).SendAsync("WalletChanged");
-                await hub.Clients.Group(MarketGroups.User(fill.SellerId)).SendAsync("WalletChanged");
+                affected.Add(fill.BuyerId);
+                affected.Add(fill.SellerId);
             }
 
-            // 등록/취소자는 에스크로가 변동되므로 지갑/인벤 재조회를 알린다.
-            await hub.Clients.Group(MarketGroups.User(actingPlayerId)).SendAsync("WalletChanged");
+            foreach (var playerId in affected)
+                await hub.Clients.Group(MarketGroups.User(playerId)).SendAsync("WalletChanged");
         }
         catch (Exception ex)
         {

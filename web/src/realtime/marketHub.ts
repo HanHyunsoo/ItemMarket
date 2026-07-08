@@ -37,6 +37,20 @@ const orderBookHandlers = new Set<OrderBookHandler>()
 const tradeHandlers = new Set<TradeHandler>()
 const walletHandlers = new Set<WalletHandler>()
 
+// WalletChanged is a payload-less "re-fetch hint": subscribers respond by GETting the
+// wallet. A single multi-fill order can emit a burst of these to the same user, and one
+// GET already yields the final balance — so coalesce the burst with a trailing debounce
+// and fan out once. Also smooths rapid local mutations (raid/gear) via notifyWalletChanged.
+const WALLET_DEBOUNCE_MS = 150
+let walletDebounceTimer: ReturnType<typeof setTimeout> | null = null
+function fanOutWalletChanged(): void {
+  if (walletDebounceTimer !== null) clearTimeout(walletDebounceTimer)
+  walletDebounceTimer = setTimeout(() => {
+    walletDebounceTimer = null
+    walletHandlers.forEach((h) => h())
+  }, WALLET_DEBOUNCE_MS)
+}
+
 // Templates we should be subscribed to; used to re-subscribe after a reconnect.
 const subscribedTemplates = new Set<number>()
 
@@ -59,7 +73,7 @@ function buildConnection(): HubConnection {
     tradeHandlers.forEach((h) => h(trade))
   })
   conn.on('WalletChanged', () => {
-    walletHandlers.forEach((h) => h())
+    fanOutWalletChanged()
   })
 
   conn.onreconnecting(() => {
@@ -174,5 +188,5 @@ export function onWalletChanged(handler: WalletHandler): () => void {
 // changes a player's balance/holdings but doesn't round-trip through the hub (e.g.
 // resolving a raid), so the header caps chip refreshes without a page reload.
 export function notifyWalletChanged(): void {
-  walletHandlers.forEach((h) => h())
+  fanOutWalletChanged()
 }
