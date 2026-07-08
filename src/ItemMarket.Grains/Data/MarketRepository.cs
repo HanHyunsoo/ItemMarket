@@ -865,9 +865,14 @@ public sealed partial class MarketRepository(
             // 0) 데드락 방지: 이 트랜잭션이 건드릴 지갑 행을 player_id 오름차순으로 미리 잠근다.
             //    서로 다른 OrderBookGrain의 동시 정산이 매수자/판매자 지갑을 '서로 다른 순서'로
             //    잠가 생기던 Postgres 교착(40P01)을 일관된 락 순서로 제거한다.
-            await db.ExecuteAsync(
-                "SELECT player_id FROM wallet WHERE player_id = ANY(@ids) ORDER BY player_id FOR UPDATE",
-                new { ids = new[] { a.BuyerId, a.SellerId } }, tx);
+            //    과거엔 `WHERE player_id = ANY(@ids) ORDER BY player_id FOR UPDATE` 한 문장으로
+            //    잠갔으나, Postgres의 행 락은 '정렬 노드 이전' 스캔 단계에서 획득되므로 락 순서는
+            //    ordered index scan일 때만 보장된다(bitmap/seq scan이면 ctid 순 → 교착 재발 소지).
+            //    플랜에 의존하지 않도록 C#에서 정렬한 뒤 한 지갑씩 개별 FOR UPDATE로 잠근다.
+            //    (자전거래는 매칭 단계에서 차단되어 두 id는 항상 다르지만, 방어적으로 중복 제거.)
+            foreach (var pid in new[] { a.BuyerId, a.SellerId }.Distinct().OrderBy(x => x))
+                await db.ExecuteAsync(
+                    "SELECT 1 FROM wallet WHERE player_id = @pid FOR UPDATE", new { pid }, tx);
 
             // 1) 체결 기록
             await db.ExecuteAsync(
