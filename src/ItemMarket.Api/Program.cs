@@ -114,6 +114,12 @@ ApiResults.Logger = app.Logger; // Exec 헬퍼의 예상외 예외 로깅용
 // 인터랙티브 API 문서(/swagger). 인증/인가 파이프라인 앞에 둬 익명 접근 가능.
 app.UseMarketOpenApi();
 
+// Orleans Dashboard(opt-in: Dashboard:Enabled) — 실로 메트릭 UI를 /dashboard 로 co-host.
+// 실로측 등록은 Infrastructure/OrleansHosting.cs. 대시보드는 자체 Basic 인증(옵션)으로 보호되며,
+// 앱 JWT 파이프라인과 독립된 브랜치라 인증/레이트리밋 앞에 둔다.
+if (cfg.GetValue("Dashboard:Enabled", false))
+    app.Map("/dashboard", d => d.UseOrleansDashboard());
+
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();

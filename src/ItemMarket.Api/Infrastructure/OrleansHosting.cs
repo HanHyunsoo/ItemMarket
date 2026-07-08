@@ -1,5 +1,6 @@
 using System.Data.Common;
 using Npgsql;
+using OrleansDashboard;
 using Orleans.Serialization;
 
 namespace ItemMarket.Api.Infrastructure;
@@ -46,6 +47,24 @@ public static class OrleansHosting
             else
             {
                 silo.UseLocalhostClustering(siloPort: siloPort, gatewayPort: gatewayPort);
+            }
+
+            // Orleans Dashboard(opt-in: Dashboard:Enabled, 기본 off) — 실로 메트릭·그레인 통계 UI.
+            // 자체 웹서버를 띄우지 않고(HostSelf=false) ASP.NET 파이프라인에 /dashboard 로 co-host한다
+            // (미들웨어 마운트는 Program.cs). off면 등록 자체를 건너뛰어 기존 테스트/데모는 불변.
+            if (cfg.GetValue("Dashboard:Enabled", false))
+            {
+                silo.UseDashboard(o =>
+                {
+                    o.HostSelf = false;
+                    var user = cfg["Dashboard:Username"];
+                    var pass = cfg["Dashboard:Password"];
+                    if (!string.IsNullOrWhiteSpace(user) && !string.IsNullOrWhiteSpace(pass))
+                    {
+                        o.Username = user;   // 설정 시 대시보드 기본 인증(Basic) 활성화
+                        o.Password = pass;
+                    }
+                });
             }
         });
 
