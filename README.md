@@ -1,27 +1,111 @@
-# Wasteland Exchange — 게임 서비스 백엔드 포트폴리오
+# Wasteland Exchange — 실시간 아이템 거래소 (Orleans 매칭 엔진)
 
 [![CI](https://github.com/HanHyunsoo/ItemMarket/actions/workflows/ci.yml/badge.svg)](https://github.com/HanHyunsoo/ItemMarket/actions/workflows/ci.yml)
 
-**아포칼립스/익스트랙션 슈터 세계관의 실시간 아이템 거래소(주문서 매칭 엔진)** — 게임 서비스 백엔드
-역량을 보여주기 위한 1인 포트폴리오입니다. 핵심은 **아웃게임 거래소**입니다: 주문서 매칭 엔진을
-**Microsoft Orleans(액터 모델)** 로 구현해 동시 주문 경쟁을 **락 코드 0줄**로 직렬화하고, 체결을
-**에스크로 + 단일 Postgres 트랜잭션**으로 원자 정산하며, 고부하 동시성에서 **돈·아이템 보존을
-SQL 불변식으로 증명**합니다. 실시간 호가/체결 푸시는 SignalR(+Redis 백플레인)로.
+**아포칼립스/익스트랙션 슈터 세계관의 실시간 아이템 거래소** — 게임 서비스 백엔드 역량을 보여주는 1인
+포트폴리오. 핵심은 **주문서 매칭 엔진**입니다: 동시 주문 경쟁을 **Microsoft Orleans 단일 활성화로 락 없이**
+직렬화하고, 체결을 **에스크로 + 단일 Postgres 트랜잭션**으로 원자 정산해 **돈·아이템 보존을 SQL 불변식으로
+증명**합니다.
 
-거래소가 진공에서 놀지 않도록, **익스트랙션 레이드 루프**를 아이템의 **공급원·소각처(경제 엔진)** 로
-얇게 붙였습니다 — 레이드로 아이템이 유입되고, 수수료·사망·확장으로 소각돼 거래에 판돈이 생깁니다.
-
-`C# / .NET 10` · `Orleans` · `PostgreSQL` · `SignalR` · `Redis` · `Vue 3` ·
-**테스트 125개** · **부하 테스트로 데드락 발견 → p99 5.5× 개선**
-
-> 평가자용 3줄 요약: (1) 매칭 동시성을 Orleans 단일 활성화로 **락 없이** 해결하고 "서로 다른 7명 동시
-> 매수 → 1건만 체결"을 테스트로 고정. (2) 에스크로 + 단일 트랜잭션 정산으로 이중판매·복제·무한발행을 차단하고
-> 부하 중 **보존 불변식**을 SQL로 검증. (3) 자작 부하 도구로 **교차-grain 데드락을 발견해 p99를
-> 973→175ms로 개선**, 핫그레인은 가격밴드 샤딩으로 2.2× 돌파.
+`C# / .NET 10` · `Orleans` · `PostgreSQL` · `SignalR` · `Redis` · `Vue 3` · **테스트 125개** ·
+**부하 테스트로 데드락 발견 → p99 5.5× 개선**
 
 ---
 
-## 데모
+## 핵심 한 가지 — 락 없는 매칭 · 원자 정산
+
+> **딱 하나만 본다면 여기입니다.** 나머지(레이드 경제·그리드 인벤토리·풀스택·어드민)는 이 거래소를
+> 살아있게 하는 **조연**이며 아래에 접어뒀습니다. 이 프로젝트의 신호는 이 한 섹션에 있습니다.
+
+주문서 매칭 엔진을 **Orleans(액터 모델)** 로 구현해 세 가지를 증명합니다:
+
+- **동시성 (락 코드 0줄)** — 종목당 grain **단일 활성화 + 논-리엔트런트**가 매칭을 단일 스레드처럼
+  직렬화 → 이중 체결·경쟁이 원천 차단. *"재고 1개에 서로 다른 7명 동시 매수 → 정확히 1건 체결, dupe 0"* 을
+  통합 테스트로 고정.
+- **정합성 (원자 정산)** — 주문 시점 **에스크로**(자산 잠금) + **각 체결을 단일 Postgres 트랜잭션**으로
+  정산. 부하 후 SQL 불변식으로 `발행 = 지갑+에스크로+소각`(diff 0)·아이템 보존·음수잔액 0 검증.
+- **문제 해결 (실측)** — 자작 부하 도구로 **교차-grain 지갑 락 순서 데드락(40P01) 발견 → 락 정렬로
+  p99 973→175ms(5.5×)**, 데드락 0.
+
+```mermaid
+sequenceDiagram
+  actor Buyer
+  participant API as Minimal API
+  participant OB as OrderBookGrain<br/>(종목당 단일 활성화)
+  participant DB as PostgreSQL<br/>(체결당 단일 트랜잭션)
+  participant Hub as SignalR / Redis
+
+  Buyer->>API: POST /orders (BUY price·qty) + Idempotency-Key
+  API->>OB: PlaceOrder — 단일 활성화 = 직렬 처리
+  activate OB
+  OB->>DB: tx1 — 에스크로(매수 캡 잠금)
+  OB->>DB: tx2 — 주문 INSERT (실패 시 보상 환불)
+  OB->>OB: 대기 매도와 매칭 (가격-시간 우선)
+  loop 체결 1건마다
+    OB->>DB: tx3+ — 체결 정산(원자): 캡↔아이템 · 수수료 소각 · item_ledger append
+    DB-->>OB: COMMIT (실패 시 재수화)
+  end
+  OB-->>API: 체결 내역 + 잔여
+  deactivate OB
+  API-->>Hub: OrderBookUpdated · TradeExecuted · WalletChanged
+  Hub-->>Buyer: 실시간 반영 (리로드 없음)
+```
+
+- **인메모리 호가창 = 재구성 가능한 투영**: 모든 변경은 같은 트랜잭션으로 DB write-through, 활성화 시
+  DB에서 재수화 → 실로 장애/유휴 비활성화에도 무손실(**DB가 최종 진실**). 그레인을 **강제 비활성화한 뒤
+  DB에만 넣은 주문이 재수화 스냅샷에 나타나고 매칭이 이어짐**을 회귀 테스트로 증명(`CrashRecoveryTests`).
+
+<details>
+<summary><b>원자성의 경계 (정확히 — 배치는 saga, 체결이 원자 단위)</b></summary>
+
+단일 활성화가 한 종목의 주문 처리를 **직렬화**하지만, 배치 경로 전체가 *하나의* 트랜잭션은 아니다.
+①에스크로, ②주문 INSERT, ③**각 체결(fill)** 은 **서로 다른 Postgres 트랜잭션**이다. 원자성이 보장되는
+단위는 **체결 1건**(캡↔아이템 이동·수수료 소각·양쪽 주문 갱신이 한 tx). 여러 체결에 걸친 테이커 주문은
+tx 사이에서 실패할 수 있고, 이때 인메모리 뷰를 버리고 DB에서 **재수화**해 복구한다(이미 커밋된 체결은
+유효). ①→② 사이 크래시(캡만 잠기고 취소할 주문이 없는 창)는 보상 트랜잭션 + `ORDER_ESCROW` 원장으로
+재조정한다. 즉 **정합성의 최종 심판은 항상 DB**이며, 원자성은 "배치 전체"가 아니라 "체결 단위 + 보상"으로
+성립한다([`docs/backend-audit.md`](docs/backend-audit.md) 참고).
+
+</details>
+
+**코드 1분 투어**: `OrderBookEngine.PlaceOrderAsync` → `MatchAsync` → `MarketRepository.SettleFillAsync`.
+깊게 읽는 순서는 **[`ONBOARDING.md`](ONBOARDING.md) 2~3장** · 면접 Q&A는
+[`interview-prep`](docs/interview-prep.md)·시니어 압박 질문 [`hotseat`](docs/interview-hotseat.md).
+
+---
+
+## 실행 방법
+
+사전 조건: **.NET 10 SDK**, **Docker**, **Node 20+**, `jq`(시드용).
+
+```bash
+# A) Docker 한 방 — 전체 스택 (postgres+redis+api+web)
+docker compose --profile app up -d --build
+#   web http://localhost:8081 · api http://localhost:8080 (/swagger) · DDL 자동 적용
+
+# B) 로컬 개발 (핫리로드)
+docker compose up -d                        # Postgres(+redis)만
+dotnet run --project src/ItemMarket.Api     # API http://localhost:5080 (/swagger)
+cd web && npm install && npm run dev         # Web http://localhost:5173
+
+# 살아있는 마켓 데이터
+./scripts/seed-market.sh && ./scripts/seed-trades.sh
+
+# 테스트 (Docker만 있으면 됨 — 일회용 Postgres 자동)
+dotnet test                                  # 125개: 단위 41 + 통합 80 + 밴딩 4
+
+# 다중 실로 + Redis 실시간 데모
+./scripts/run-cluster.sh
+```
+
+로그인(데모, 비밀번호 없음): `Survivor_Alpha` · `Survivor_Bravo` · `Trader_Charlie`(admin).
+
+---
+
+> 아래는 **조연** — 거래소를 살아있게 하는 나머지 시스템·근거·자료입니다. 필요할 때 펼쳐 보세요.
+
+<details>
+<summary>📊 <b>데모 GIF</b> (실시간 체결 · 그리드 DnD · 익스트랙션 레이드)</summary>
 
 라이브 앱을 Playwright로 녹화한 실동작 GIF입니다 (재현: [`tools/screenshots`](tools/screenshots)).
 
@@ -42,34 +126,10 @@ SQL 불변식으로 증명**합니다. 실시간 호가/체결 푸시는 SignalR
 </tr>
 </table>
 
----
+</details>
 
-## 이 프로젝트로 증명하는 것 (엔지니어링 역량)
-
-- **동시성 설계 (거래소 핵심)** — Orleans 단일 활성화 + 턴 기반으로 아이템별 매칭을 **락 코드 0줄**로
-  직렬화. "단일 재고 1개에 서로 다른 7명 동시 매수 → 정확히 1건 체결, dupe 0"을 통합 테스트로 증명.
-- **트랜잭션 · 데이터 정합성** — 주문 시점 **에스크로**(자산 잠금) + 체결 **단일 Postgres 트랜잭션**
-  원자 정산. 부하 후 SQL 불변식으로 `발행 = 지갑+에스크로+소각`(diff 0)·아이템 보존·음수잔액 0 검증.
-- **성능 분석 · 최적화** — 직접 만든 부하 도구([`tools/LoadTest`](tools/LoadTest))로 측정 →
-  **교차-grain 지갑 락 순서 데드락(40P01) 발견 → 락 정렬로 p99 973→175ms(5.5×)**, 핫그레인 가격밴드
-  샤딩으로 처리량 2.2× ([`docs/perf-report.md`](docs/perf-report.md)).
-- **분산 시스템** — Orleans 클러스터링(Postgres 멤버십)으로 다중 실로, SignalR + **Redis 백플레인**으로
-  인스턴스 간 실시간 푸시를 ON/OFF 대조로 실증.
-- **보안 · 견고성** — 감사 중 **병뚜껑 무한발행 취약점(정수 오버플로) 발견·차단**, JWT +
-  리프레시 토큰(로테이션·재사용 탐지), 주문 멱등성, 레이트 리미팅.
-- **도메인 상태머신 · 원자 정산 (경제 엔진)** — 익스트랙션 세션(`RaidSessionGrain`)의 출격/탈출/사망
-  전이를 각각 단일 Postgres 트랜잭션으로 정산, 총량 보존·스태시 불가침을 불변식 테스트로 고정.
-- **설계 판단 · 트레이드오프** — "MSA 대신 Orleans", "Orleans Tx 대신 DB Tx", "fungible엔 per-unit
-  UUID를 안 붙이는 이유" 등을 **근거와 함께** 선택·문서화.
-- **품질 · 운영** — Testcontainers 기반 통합 테스트 우선(총 125개) · CI · Docker 한 방 실행 · Swagger ·
-  어드민 GM 툴 · 풀스택(Vue 3).
-
-> 면접용 Q&A·STAR 스토리·화이트보드 요약: **[`docs/interview-prep.md`](docs/interview-prep.md)** ·
-> 시니어 면접관 예상 압박 질문: **[`docs/interview-hotseat.md`](docs/interview-hotseat.md)**
-
----
-
-## 아키텍처
+<details>
+<summary>🏗️ <b>아키텍처</b> (전체 구성도)</summary>
 
 ```mermaid
 flowchart TB
@@ -98,51 +158,37 @@ flowchart TB
   API -. "backplane / idempotency" .-> RD
 ```
 
-- **인메모리 호가창 = 재구성 가능한 투영**: 모든 변경은 같은 트랜잭션으로 DB write-through, 활성화 시
-  DB에서 재수화 → 실로 장애/유휴 비활성화에도 무손실. **DB가 최종 진실**. 그레인을 **강제 비활성화한 뒤
-  DB에만 넣은 주문이 재수화 스냅샷에 나타나고 매칭이 이어짐**을 회귀 테스트로 증명(`CrashRecoveryTests`).
 - **다중 인스턴스**: Orleans가 grain을 실로에 분산, SignalR은 Redis로 인스턴스 간 푸시 중계.
+- **관측성(opt-in)**: `Dashboard:Enabled` 설정 시 Orleans Dashboard를 `/dashboard`로 co-host —
+  실로·grain 활성화·호출/지연을 실시간 조회.
 
-### 매칭 · 정산 시퀀스 (거래소 핵심 경로)
+</details>
 
-주문 하나가 들어와 체결·정산·실시간 푸시까지 가는 길. **단일 활성화가 매칭을 직렬화**하고, **각 체결
-정산은 독립된 단일 트랜잭션 안에서 원자적**이며, 인메모리 호가창은 **커밋 후에만** 반영된다(실패 시 재수화).
+<details>
+<summary>🧩 <b>이 프로젝트로 증명하는 것</b> (엔지니어링 역량 8가지)</summary>
 
-> **원자성의 경계(정확히)**: 단일 활성화가 한 종목의 주문 처리를 **직렬화**하지만, 배치 경로 전체가
-> *하나의* 트랜잭션은 아니다. ①에스크로, ②주문 INSERT, ③**각 체결(fill)** 은 **서로 다른 Postgres
-> 트랜잭션**이다. 원자성이 보장되는 단위는 **체결 1건**(캡↔아이템 이동·수수료 소각·양쪽 주문 갱신이
-> 한 tx). 여러 체결에 걸친 테이커 주문은 tx 사이에서 실패할 수 있고, 이때 인메모리 뷰를 버리고 DB에서
-> **재수화**해 복구한다(이미 커밋된 체결은 유효). ①→② 사이 크래시(캡만 잠기고 취소할 주문이 없는 창)는
-> 보상 트랜잭션 + `ORDER_ESCROW` 원장으로 재조정한다. 즉 **정합성의 최종 심판은 항상 DB**이며,
-> 원자성은 "배치 전체"가 아니라 "체결 단위 + 보상"으로 성립한다([`docs/backend-audit.md`](docs/backend-audit.md) 참고).
+- **동시성 설계 (거래소 핵심)** — Orleans 단일 활성화 + 턴 기반으로 아이템별 매칭을 **락 코드 0줄**로
+  직렬화. "단일 재고 1개에 서로 다른 7명 동시 매수 → 정확히 1건 체결, dupe 0"을 통합 테스트로 증명.
+- **트랜잭션 · 데이터 정합성** — 주문 시점 **에스크로**(자산 잠금) + 체결 **단일 Postgres 트랜잭션**
+  원자 정산. 부하 후 SQL 불변식으로 `발행 = 지갑+에스크로+소각`(diff 0)·아이템 보존·음수잔액 0 검증.
+- **성능 분석 · 최적화** — 직접 만든 부하 도구([`tools/LoadTest`](tools/LoadTest))로 측정 →
+  **교차-grain 지갑 락 순서 데드락(40P01) 발견 → 락 정렬로 p99 973→175ms(5.5×)**, 핫그레인 가격밴드
+  샤딩으로 처리량 2.2× ([`docs/perf-report.md`](docs/perf-report.md)).
+- **분산 시스템** — Orleans 클러스터링(Postgres 멤버십)으로 다중 실로, SignalR + **Redis 백플레인**으로
+  인스턴스 간 실시간 푸시를 ON/OFF 대조로 실증.
+- **보안 · 견고성** — 감사 중 **병뚜껑 무한발행 취약점(정수 오버플로) 발견·차단**, JWT +
+  리프레시 토큰(로테이션·재사용 탐지), 주문 멱등성, 레이트 리미팅.
+- **도메인 상태머신 · 원자 정산 (경제 엔진)** — 익스트랙션 세션(`RaidSessionGrain`)의 출격/탈출/사망
+  전이를 각각 단일 Postgres 트랜잭션으로 정산, 총량 보존·스태시 불가침을 불변식 테스트로 고정.
+- **설계 판단 · 트레이드오프** — "MSA 대신 Orleans", "Orleans Tx 대신 DB Tx", "fungible엔 per-unit
+  UUID를 안 붙이는 이유" 등을 **근거와 함께** 선택·문서화.
+- **품질 · 운영** — Testcontainers 기반 통합 테스트 우선(총 125개) · CI · Docker 한 방 실행 · Swagger ·
+  어드민 GM 툴 · 풀스택(Vue 3).
 
-```mermaid
-sequenceDiagram
-  actor Buyer
-  participant API as Minimal API
-  participant OB as OrderBookGrain<br/>(종목당 단일 활성화)
-  participant DB as PostgreSQL<br/>(체결당 단일 트랜잭션)
-  participant Hub as SignalR / Redis
+</details>
 
-  Buyer->>API: POST /orders (BUY price·qty) + Idempotency-Key
-  API->>OB: PlaceOrder — 단일 활성화 = 직렬 처리
-  activate OB
-  OB->>DB: tx1 — 에스크로(매수 캡 잠금)
-  OB->>DB: tx2 — 주문 INSERT (실패 시 보상 환불)
-  OB->>OB: 대기 매도와 매칭 (가격-시간 우선)
-  loop 체결 1건마다
-    OB->>DB: tx3+ — 체결 정산(원자): 캡↔아이템 · 수수료 소각 · item_ledger append
-    DB-->>OB: COMMIT (실패 시 재수화)
-  end
-  OB-->>API: 체결 내역 + 잔여
-  deactivate OB
-  API-->>Hub: OrderBookUpdated · TradeExecuted · WalletChanged
-  Hub-->>Buyer: 실시간 반영 (리로드 없음)
-```
-
----
-
-## 스크린샷
+<details>
+<summary>🖼️ <b>스크린샷</b> (마켓 · 아이템 상세 · 지갑 · 어드민 · Gear · Raid · 리더보드 · Swagger)</summary>
 
 | | |
 |---|---|
@@ -157,9 +203,10 @@ sequenceDiagram
 
 <sub>Vue 3 + Element Plus 다크 테마. Playwright로 재현 가능 — [`tools/screenshots`](tools/screenshots).</sub>
 
----
+</details>
 
-## 핵심 설계 결정 & 트레이드오프
+<details>
+<summary>⚖️ <b>핵심 설계 결정 & 트레이드오프</b> (왜 X 아니고 Y인가)</summary>
 
 | 결정 | 이유 (요약) |
 |---|---|
@@ -170,9 +217,10 @@ sequenceDiagram
 | **fungible엔 per-unit UUID 안 씀** | 탄약 1000발에 UUID 1000개는 "지폐 일련번호" 격. 출처는 `item_ledger`(append-only 이벤트)로 추적하고, 유니크 아이템만 인스턴스 UUID + `item_instance.origin`(SEED/RAID/RAID_LOST…)으로 프로버넌스 보존 |
 | **Redis는 필요 시점에만** | 단일 인스턴스는 인메모리로 충분. 다중 인스턴스 실시간이 필요해질 때 백플레인으로 |
 
----
+</details>
 
-## 성능 · 정합성 (실측)
+<details>
+<summary>📈 <b>성능 · 정합성 (실측)</b> + 발견하고 고친 결함</summary>
 
 실제 **API→Orleans→PostgreSQL** 경로를 봇 클라이언트로 부하하고 SQL로 불변식을 검증했습니다
 (M2 Pro, Release, 200 players·64 동시성 · 상세: [`docs/perf-report.md`](docs/perf-report.md)).
@@ -191,17 +239,18 @@ sequenceDiagram
   `playerId` 순 락 정렬로 **973 → 175ms (5.5×)**, 데드락 0.
 - **정합성 불변식 전 항목 PASS**: 수만 건 동시 체결에도 병뚜껑·아이템 보존, 음수잔액 0.
 
-### 발견하고 고친 결함 (문제 해결)
-자체 감사로 잡은 것 — **문제→원인→해결→회귀 테스트**. 전체: [`docs/backend-audit.md`](docs/backend-audit.md).
+**발견하고 고친 결함 (문제 해결)** — 자체 감사로 잡은 것, **문제→원인→해결→회귀 테스트**.
+전체: [`docs/backend-audit.md`](docs/backend-audit.md).
 1. **병뚜껑 무한발행(Critical)** — `단가×수량` 정수 오버플로가 음수 에스크로로 지갑에 돈을 꽂음 →
    Int128 검증+상한으로 차단.
 2. **에스크로 후 주문 INSERT 실패 시 자산 증발(Critical)** — 보상 트랜잭션으로 원복.
 3. **정산 실패가 호가창 오염(Critical)** — 커밋 후에만 인메모리 반영 + 실패 시 재수화.
 4. **자전거래·교차-grain 데드락·그리드 제약 버그·DnD DataCloneError** 등 — 각각 수정+테스트.
 
----
+</details>
 
-## 경제 엔진 — 익스트랙션 루프 (거래소를 살아있게 하는 수요·공급)
+<details>
+<summary>🔁 <b>경제 엔진 — 익스트랙션 루프</b> (거래소를 살아있게 하는 수요·공급)</summary>
 
 거래소가 진공에서 놀지 않도록, 아이템의 **공급원(faucet)·소각처(sink)** 를 서버 권위·원자성으로
 모델링했습니다. 게임플레이 틱/전투는 범위 밖 — 이 백엔드는 게임 서버가 호출하는 서비스이며
@@ -253,37 +302,10 @@ stateDiagram-v2
 > 표현, 셀 유일성·NULL 접기, at-risk 한 방 쿼리)는 **[`docs/api-contract.md`](docs/api-contract.md)** 와
 > `db/ddl.sql` 참고.
 
----
+</details>
 
-## 실행 방법
-
-사전 조건: **.NET 10 SDK**, **Docker**, **Node 20+**, `jq`(시드용).
-
-```bash
-# A) Docker 한 방 — 전체 스택 (postgres+redis+api+web)
-docker compose --profile app up -d --build
-#   web http://localhost:8081 · api http://localhost:8080 (/swagger) · DDL 자동 적용
-
-# B) 로컬 개발 (핫리로드)
-docker compose up -d                        # Postgres(+redis)만
-dotnet run --project src/ItemMarket.Api     # API http://localhost:5080 (/swagger)
-cd web && npm install && npm run dev         # Web http://localhost:5173
-
-# 살아있는 마켓 데이터
-./scripts/seed-market.sh && ./scripts/seed-trades.sh
-
-# 테스트 (Docker만 있으면 됨 — 일회용 Postgres 자동)
-dotnet test                                  # 125개: 단위 41 + 통합 80 + 밴딩 4
-
-# 다중 실로 + Redis 실시간 데모
-./scripts/run-cluster.sh
-```
-
-로그인(데모, 비밀번호 없음): `Survivor_Alpha` · `Survivor_Bravo` · `Trader_Charlie`(admin).
-
----
-
-## 테스트
+<details>
+<summary>✅ <b>테스트</b> (통합 우선 · 125개)</summary>
 
 Testcontainers Postgres + `WebApplicationFactory`로 **실제 API+Orleans+DB를 목킹 없이** 검증하는
 통합 테스트 우선 전략. 커버: 원자 정산·수수료 소각, 부분 체결, 에스크로 환불, **동시 매수 단일 체결**,
@@ -291,9 +313,10 @@ Testcontainers Postgres + `WebApplicationFactory`로 **실제 API+Orleans+DB를 
 컨테이너 간 이동·다중 스택 분할/병합·장비 착용/해제, **레이드 세션 정산**(출격/탈출-제자리복원/사망
 불변식·총량 보존), 가격밴드 격리. 순수 로직(기하·수수료)은 DB 없는 단위 테스트.
 
----
+</details>
 
-## 기술 스택
+<details>
+<summary>🧰 <b>기술 스택</b></summary>
 
 | 스택 | 역할 / 이유 |
 |---|---|
@@ -305,9 +328,10 @@ Testcontainers Postgres + `WebApplicationFactory`로 **실제 API+Orleans+DB를 
 | **Vue 3 · TS · Element Plus** | 운영 툴 포함 프론트, C# DTO를 TS로 미러링해 계약 강제 |
 | **Testcontainers · GitHub Actions · Docker** | 통합 테스트 우선 · CI 게이트 · 한 방 실행 |
 
----
+</details>
 
-## 프로젝트 구조 & 문서
+<details>
+<summary>📁 <b>프로젝트 구조 & 문서</b></summary>
 
 ```
 src/ItemMarket.Contracts/   # 프론트/백 공유 계약(DTO)
@@ -317,6 +341,7 @@ web/                        # Vue 3 프론트 + 픽셀 스프라이트
 db/ · tests/ · tools/ · scripts/ · docs/ · Dockerfile · docker-compose.yml · .github/
 ```
 
+- [`ONBOARDING.md`](ONBOARDING.md) — 실습 주도 코드 투어(요청 추적·정산 정독·재수화)
 - [`docs/interview-prep.md`](docs/interview-prep.md) — 면접 Q&A·STAR·JD 매핑
 - [`docs/interview-hotseat.md`](docs/interview-hotseat.md) — 시니어 Orleans 게임서버 면접관 예상 질문·파고들 지점
 - [`docs/api-contract.md`](docs/api-contract.md) · [`docs/realtime-contract.md`](docs/realtime-contract.md) — REST/실시간 계약
@@ -324,9 +349,10 @@ db/ · tests/ · tools/ · scripts/ · docs/ · Dockerfile · docker-compose.yml
 - [`docs/perf-report.md`](docs/perf-report.md) — 부하 테스트·병목 분석
 - [`docs/qa-report.md`](docs/qa-report.md) — QA 패스(기능+플레이테스트) 발견 이슈·개선 백로그
 
----
+</details>
 
-## 한계 & 다음 스텝 (스코프 명시)
+<details>
+<summary>🚧 <b>한계 & 다음 스텝</b> (스코프 명시)</summary>
 
 포트폴리오 스코프라 의도적으로 남긴 부분 — 확장 방향까지 인지하고 있습니다.
 - **초점**: 이 프로젝트의 중심은 **아웃게임 거래소**입니다. 레이드는 경제에 수요/공급을 만드는 얇은
@@ -334,6 +360,8 @@ db/ · tests/ · tools/ · scripts/ · docs/ · Dockerfile · docker-compose.yml
 - **인증**: 데모 로그인은 비밀번호가 없음. 실서비스는 자격증명·비대칭키·시크릿 매니저·폐기 리스트 필요
   (토큰 단위 폐기용 `jti`는 이미 발급).
 - **성능 수치**: 단일 노드 측정 → 절대치보다 상대 비교·불변식이 핵심 산출물.
-- **관측성**: 구조적 로깅은 있으나 메트릭/트레이싱(OpenTelemetry)은 로드맵.
+- **관측성**: 구조적 로깅 + Orleans Dashboard(opt-in). 메트릭/트레이싱(OpenTelemetry)은 로드맵.
 - **거래소 심화 방향**: 시장 심도(depth) 뷰, 캔들/차트, 부분 취소·정정 주문, 다중 노드 매칭 벤치.
 - **경제 엔진 확장 방향**: 보험, 그리드 회전, 아이템 내구도/수리, 이상거래(RMT) 탐지.
+
+</details>
