@@ -105,24 +105,35 @@ flowchart TB
 
 ### 매칭 · 정산 시퀀스 (거래소 핵심 경로)
 
-주문 하나가 들어와 체결·정산·실시간 푸시까지 가는 길. **단일 활성화가 매칭을 직렬화**하고, **정산은
-한 트랜잭션 안에서 원자적**이며, 인메모리 호가창은 **커밋 후에만** 반영된다(실패 시 재수화).
+주문 하나가 들어와 체결·정산·실시간 푸시까지 가는 길. **단일 활성화가 매칭을 직렬화**하고, **각 체결
+정산은 독립된 단일 트랜잭션 안에서 원자적**이며, 인메모리 호가창은 **커밋 후에만** 반영된다(실패 시 재수화).
+
+> **원자성의 경계(정확히)**: 단일 활성화가 한 종목의 주문 처리를 **직렬화**하지만, 배치 경로 전체가
+> *하나의* 트랜잭션은 아니다. ①에스크로, ②주문 INSERT, ③**각 체결(fill)** 은 **서로 다른 Postgres
+> 트랜잭션**이다. 원자성이 보장되는 단위는 **체결 1건**(캡↔아이템 이동·수수료 소각·양쪽 주문 갱신이
+> 한 tx). 여러 체결에 걸친 테이커 주문은 tx 사이에서 실패할 수 있고, 이때 인메모리 뷰를 버리고 DB에서
+> **재수화**해 복구한다(이미 커밋된 체결은 유효). ①→② 사이 크래시(캡만 잠기고 취소할 주문이 없는 창)는
+> 보상 트랜잭션 + `ORDER_ESCROW` 원장으로 재조정한다. 즉 **정합성의 최종 심판은 항상 DB**이며,
+> 원자성은 "배치 전체"가 아니라 "체결 단위 + 보상"으로 성립한다([`docs/backend-audit.md`](docs/backend-audit.md) 참고).
 
 ```mermaid
 sequenceDiagram
   actor Buyer
   participant API as Minimal API
   participant OB as OrderBookGrain<br/>(종목당 단일 활성화)
-  participant DB as PostgreSQL<br/>(단일 트랜잭션)
+  participant DB as PostgreSQL<br/>(체결당 단일 트랜잭션)
   participant Hub as SignalR / Redis
 
   Buyer->>API: POST /orders (BUY price·qty) + Idempotency-Key
   API->>OB: PlaceOrder — 단일 활성화 = 직렬 처리
   activate OB
-  OB->>DB: BEGIN · 에스크로(매수 캡 잠금)
+  OB->>DB: tx1 — 에스크로(매수 캡 잠금)
+  OB->>DB: tx2 — 주문 INSERT (실패 시 보상 환불)
   OB->>OB: 대기 매도와 매칭 (가격-시간 우선)
-  OB->>DB: 체결 정산 — 캡↔아이템 이동 · 수수료 소각 · item_ledger append
-  DB-->>OB: COMMIT (원자)
+  loop 체결 1건마다
+    OB->>DB: tx3+ — 체결 정산(원자): 캡↔아이템 · 수수료 소각 · item_ledger append
+    DB-->>OB: COMMIT (실패 시 재수화)
+  end
   OB-->>API: 체결 내역 + 잔여
   deactivate OB
   API-->>Hub: OrderBookUpdated · TradeExecuted · WalletChanged
