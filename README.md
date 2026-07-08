@@ -64,7 +64,8 @@ SQL 불변식으로 증명**합니다. 실시간 호가/체결 푸시는 SignalR
 - **품질 · 운영** — Testcontainers 기반 통합 테스트 우선(총 125개) · CI · Docker 한 방 실행 · Swagger ·
   어드민 GM 툴 · 풀스택(Vue 3).
 
-> 면접용 Q&A·STAR 스토리·화이트보드 요약: **[`docs/interview-prep.md`](docs/interview-prep.md)**
+> 면접용 Q&A·STAR 스토리·화이트보드 요약: **[`docs/interview-prep.md`](docs/interview-prep.md)** ·
+> 시니어 면접관 예상 압박 질문: **[`docs/interview-hotseat.md`](docs/interview-hotseat.md)**
 
 ---
 
@@ -302,6 +303,7 @@ db/ · tests/ · tools/ · scripts/ · docs/ · Dockerfile · docker-compose.yml
 ```
 
 - [`docs/interview-prep.md`](docs/interview-prep.md) — 면접 Q&A·STAR·JD 매핑
+- [`docs/interview-hotseat.md`](docs/interview-hotseat.md) — 시니어 Orleans 게임서버 면접관 예상 질문·파고들 지점
 - [`docs/api-contract.md`](docs/api-contract.md) · [`docs/realtime-contract.md`](docs/realtime-contract.md) — REST/실시간 계약
 - [`docs/backend-audit.md`](docs/backend-audit.md) — 자체 감사(결함→수정→테스트)
 - [`docs/perf-report.md`](docs/perf-report.md) — 부하 테스트·병목 분석
