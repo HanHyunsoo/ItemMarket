@@ -136,32 +136,35 @@ public class MarketFlowTests(MarketAppFixture f)
             (await admin.GetAsync("/api/admin/trades")).StatusCode);
     }
 
-    // 동시성: 단일 재고(수량1)에 다수 동시 매수 → 정확히 1건만 체결(dupe/이중판매 0)
+    // 동시성: 단일 재고(수량1)에 서로 다른 여러 플레이어가 동시 매수 → 정확히 1건만 체결(dupe/이중판매 0).
+    // 서로 다른 플레이어라 지갑 grain에선 병렬이고 유일한 직렬화 지점은 OrderBookGrain(94)의 단일 활성화다
+    // → "락 없는 매칭 직렬화"를 순수하게 증명한다(같은 buyer면 WalletGrain에서도 직렬화돼 증명력이 약함).
     [Fact]
     public async Task Concurrent_buys_against_single_unit_never_double_sell()
     {
         var admin = await _f.AuthedAs(Charlie);
         var seller = await _f.AuthedAs(Alpha);
-        var buyer = await _f.AuthedAs(Bravo);
 
-        // 깨끗한 94번에 판매자 재고 1개 지급
+        // 깨끗한 94번에 판매자 재고 1개 지급 → 1개만 매도.
         (await admin.PostAsJsonAsync("/api/admin/grant/stack",
             new AdminGrantStackRequest(Alpha, 94, 1), Json)).EnsureSuccessStatusCode();
-
         var sell = await Api<PlaceOrderResult>(await seller.PostAsJsonAsync(
             "/api/orders", new PlaceOrderRequest(OrderSide.Sell, 94, 5, 1), Json));
         Assert.True(sell.Success);
 
-        // 같은 매도에 8건 동시 매수
-        var buys = Enumerable.Range(0, 8).Select(_ =>
-            buyer.PostAsJsonAsync("/api/orders",
-                new PlaceOrderRequest(OrderSide.Buy, 94, 5, 1), Json));
+        // 판매자(Alpha)를 제외한 서로 다른 7명이 같은 매도 1개를 동시에 노린다.
+        var buyerIds = new[] { Bravo, Charlie, Delta, Echo, Foxtrot, Golf, Hotel };
+        var buyers = await Task.WhenAll(buyerIds.Select(id => _f.AuthedAs(id)));
+        var buys = buyers.Select(b => b.PostAsJsonAsync(
+            "/api/orders", new PlaceOrderRequest(OrderSide.Buy, 94, 5, 1), Json));
         await Task.WhenAll(buys);
 
+        // 7명이 경쟁했지만 체결은 정확히 1건, 재고는 정확히 한 명에게만 귀속(이중판매 0).
         var trades = await Api<PagedResult<TradeDto>>(
-            await buyer.GetAsync("/api/market/94/trades?page=1&size=50"));
-        Assert.Equal(1, trades.Data!.TotalCount);      // 체결 정확히 1건
-        Assert.Equal(1, await StackQty(buyer, 94));    // 구매자 1개만 수령
+            await admin.GetAsync("/api/market/94/trades?page=1&size=50"));
+        Assert.Equal(1, trades.Data!.TotalCount);
+        var received = await Task.WhenAll(buyers.Select(b => StackQty(b, 94)));
+        Assert.Equal(1, received.Sum());               // 전체 통틀어 정확히 1개만 지급됨
     }
 
     // L7: fee_bps는 설정 경로가 없어 읽는 지점(GetFeeBpsAsync)이 유일 방어 — [0,10000]으로 클램프한다.

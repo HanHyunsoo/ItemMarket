@@ -8,6 +8,12 @@
 작성 시점 기준 테스트/빌드는 전부 green(`dotnet test` 124, `web build`/`lint`). 아래는 그 위에서 발견한
 개선 여지다.
 
+> **[상태 — 갱신]** 아래는 QA 패스 **당시 원본 발견 목록**이다. **대부분 이후 수정 완료**되었고, 확인된
+> 버그 항목에는 **✅ FIXED** 태그(회귀 테스트/커밋)를 달았다 — 전체 해결 내역은 하단 **수정 백로그
+> 체크리스트** 참조. 본문의 `file:line`은 이후 `MarketRepository` **partial 분할(커밋 `5594dd4`)** 이전
+> 기준이라 현재 줄번호와 다를 수 있고, `AddLootAsync`는 현재 `ScavengeAsync`로 대체됐다. 남은 미해결은
+> 의도된 트레이드오프(가격밴드 등)이거나 `backend-audit.md`에 정직하게 disclose된 항목이다.
+
 ---
 
 ## 0. 우선순위 요약 (권장 수정 순서)
@@ -16,12 +22,12 @@
 |---|---|---|---|---|
 | 1 | 레이드에 리스크가 없음(무료·무한 전리품, 사망은 수동 클릭만) | fun | ★★★ | 설계 |
 | 2 | 경제가 무한 팽창(무료 전리품 → 무한 병뚜껑) | fun | ★★★ | 설계 |
-| 3 | 사망 시 `item_ledger` 이중 차감(반입분) — 원장 정합성 | 기능 | ★★ | 버그(확인) |
+| 3 | 사망 시 `item_ledger` 이중 차감(반입분) — 원장 정합성 | 기능 | ★★ | 버그(✅수정) |
 | 4 | 마켓 카드가 시세가 아닌 고정 `base_value` 표시 | fun | ★★ | 설계/UX |
-| 5 | `AddLoot`/`StartRaid` 응답 `StartedAt` 시계 불일치 | 기능 | ★★ | 버그(확인) |
+| 5 | `AddLoot`/`StartRaid` 응답 `StartedAt` 시계 불일치 | 기능 | ★★ | 버그(✅수정) |
 | 6 | 첫 세션 온보딩 부재("스프레드시트에 던져짐") | fun | ★★ | UX |
-| 7 | 멱등성 헤더가 무시됨(이 배포는 Redis 미구성 → 중복 주문 생성) | 기능 | ★★ | 버그(확인) |
-| 8 | OpenAPI가 enum을 정수로 선언(런타임은 문자열) — 생성 클라이언트 역직렬화 실패 | 기능 | ★★ | 계약(확인) |
+| 7 | 멱등성 헤더가 무시됨(이 배포는 Redis 미구성 → 중복 주문 생성) | 기능 | ★★ | 버그(✅수정) |
+| 8 | OpenAPI가 enum을 정수로 선언(런타임은 문자열) — 생성 클라이언트 역직렬화 실패 | 기능 | ★★ | 계약(✅수정) |
 | 9 | `GET /api/stash/container` → 500(400이어야) | 기능 | ★ | 버그(확인) |
 | 10 | 계약 문서 불일치(Quantity 풀 의미·AddLoot.Kind·GET /api/raid 주석) | 기능 | ★ | 문서 |
 | 11 | 나머지 견고성/엣지(fee_bps 상한, 이중환불 창, 레이트리밋 임계 등) | 기능 | ★ | 견고성 |
@@ -40,7 +46,9 @@
 
 ### A-1. 레이드 (`MarketRepository.cs`)
 
-**BUG A (★★, 확인) — 사망 시 반입분 원장 이중 차감.**
+**BUG A (★★, ✅ FIXED) — 사망 시 반입분 원장 이중 차감.**
+> **해결**: 사망 정산이 `RaidLoss`를 아예 기록하지 않도록 대칭화(반입분은 출격 때 이미 debit) —
+> `MarketRepository.Raid.cs` 사망 분기. 원장 보존식 회귀 테스트로 고정.
 `item_ledger`는 잔고형 원장(부호 있는 delta 합 = 보유량)이다. 반입 아이템은 **출격 때 한 번**
 (`RaidBrought -qty`, 실제 `inventory_stack` 차감 동반) 차감되고, **사망 때 또 한 번**(`RaidLoss -qty`,
 이번엔 인벤 변화 없음) 차감된다.
@@ -51,7 +59,9 @@
 - 위치: 출격 `MarketRepository.cs:1111`(스택)/`:1148`(유니크), 사망 `:1307`/`:1315`.
 - 방향(참고): 사망 시 반입분은 원장 재기입을 생략(이미 출격 때 debit)하고, 전리품 사망분만 별도 처리.
 
-**BUG B (★★, 확인) — `AddLoot`/`StartRaid` 응답의 `StartedAt`가 앱 시계값.**
+**BUG B (★★, ✅ FIXED) — `AddLoot`/`StartRaid` 응답의 `StartedAt`가 앱 시계값.**
+> **해결**: `LoadRaidDtoAsync`가 `started_at`/`resolved_at`을 DB에서 읽도록 변경(앱 시계 제거) —
+> `MarketRepository.Raid.cs`. 회귀 `RaidTests.Raid_timestamps_come_from_db_and_startedat_is_stable_across_loot`.
 `AddLootAsync`가 `LoadRaidDtoAsync(..., DateTimeOffset.UtcNow, ...)`로 DTO를 만들어(`:1230`), 매 loot
 호출 응답의 `StartedAt`가 그 순간 시각이 된다(세션 실제 시작이 아님). `GET /api/raid`(DB `started_at`,
 `:1013`)·history와 불일치. `StartRaidAsync`도 동일 패턴(`:1159`, 시작 시점이라 영향 경미). 해결 시
@@ -144,7 +154,9 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 > 최종 취합 패스에서 라이브 검증(psql 불변식 + 실제 요청)으로 추가 확인한 항목. 이 배포는 **Redis
 > 미구성** 상태였음(멱등성·SignalR 백플레인이 무저장 폴백으로 동작) — 다중 인스턴스/프로덕션과 다름.
 
-**M2 (★★, 확인) — `Idempotency-Key`가 무시되어 중복 주문 생성.** Redis 미구성이라 `NullIdempotencyStore`가
+**M2 (★★, ✅ FIXED) — `Idempotency-Key`가 무시되어 중복 주문 생성.**
+> **해결**: 비내구(무저장 폴백) 저장소일 때 조용히 통과 대신 **503 `IdempotencyUnavailable`로 거부**
+> (`ApiResults.ExecIdempotent`) — "헤더를 광고하면서 보호는 0"을 제거. 프로덕션은 Redis 필수. Redis 미구성이라 `NullIdempotencyStore`가
 바인딩(`Program.cs:76-79`)되고 `TryClaimAsync`가 항상 `Claimed` 반환(중복 미탐, `IdempotencyStore.cs:84-92`).
 재현: 동일 `Idempotency-Key`로 `POST /api/orders` 2회 → 서로 다른 주문 2건 생성. 개발용 폴백으로 문서화돼
 있으나, 앱은 헤더를 광고하면서 보호는 0. → 프로덕션은 Redis 필수(무저장 폴백일 땐 헤더를 거부하거나 경고).
@@ -227,7 +239,8 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
 - **기능 QA:** 영역별 코드 정독(매칭·지갑 / 레이드 / 스태시·다중 스택) + 라이브 재현. 심각도·상태(확인/
   이론/의도됨) 표기. 정합성 불변식(fee 보존·이중판매·데드락 순서)은 코드 증명으로 소거.
 - **fun QA:** 라이브 앱 직접 플레이(무료 loot로 경제 취약점 실증) + 화면 코드 확인. 주관적 설계·UX 신호.
-- 이 문서의 findings는 **미수정 상태**로, 후속 작업에서 우선순위에 따라 처리한다.
+- 이 문서의 findings는 **대부분 수정 완료**되었다(확인 버그는 본문 ✅ FIXED 태그 + 하단 수정 백로그 참조).
+  남은 항목은 의도된 트레이드오프이거나 `backend-audit.md`에 disclose된 것으로, 코드에 열려 있는 정합성 버그는 없다.
 
 ---
 
