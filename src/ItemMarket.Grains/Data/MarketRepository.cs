@@ -131,10 +131,7 @@ public sealed partial class MarketRepository(
         if (amount <= 0) return;
         await using var db = Open();
         await using var tx = await db.BeginTransactionAsync();
-        var after = await db.ExecuteScalarAsync<long>(
-            "UPDATE wallet SET balance = balance + @amount WHERE player_id = @playerId RETURNING balance",
-            new { amount, playerId }, tx);
-        await InsertLedgerAsync(db, tx, playerId, amount, after, WalletLedgerReason.OrderRefund, refId);
+        await CreditWalletAsync(db, tx, playerId, amount, WalletLedgerReason.OrderRefund, refId);
         await tx.CommitAsync();
     }
 
@@ -192,6 +189,21 @@ public sealed partial class MarketRepository(
             @"INSERT INTO wallet_ledger(player_id, delta, balance_after, reason, ref_id)
               VALUES (@playerId, @delta, @balanceAfter, @reason, @refId)",
             new { playerId, delta, balanceAfter, reason = reason.ToDb(), refId }, tx);
+
+    /// <summary>
+    /// 지갑 잔액을 delta만큼 조정(+입금/−출금)하고 같은 트랜잭션에 원장을 기록한 뒤 갱신 후 잔액을 반환한다.
+    /// "UPDATE ... RETURNING balance + InsertLedger" 쌍의 단일 지점 — 정산/환불/벤더 등 잔액 불변식이
+    /// 이미 보장된 경로에서 쓴다. (음수 잔액 가드가 필요한 AdminAdjust·에스크로 선점은 자체 검증을 유지.)
+    /// </summary>
+    private static async Task<long> CreditWalletAsync(NpgsqlConnection db, NpgsqlTransaction tx,
+        Guid playerId, long delta, WalletLedgerReason reason, Guid? refId)
+    {
+        var after = await db.ExecuteScalarAsync<long>(
+            "UPDATE wallet SET balance = balance + @delta WHERE player_id = @playerId RETURNING balance",
+            new { delta, playerId }, tx);
+        await InsertLedgerAsync(db, tx, playerId, delta, after, reason, refId);
+        return after;
+    }
 
     // ======================================================================
     //  인벤토리
@@ -691,10 +703,7 @@ public sealed partial class MarketRepository(
             }
 
             // 캡 발행(faucet): 지갑에 대금 지급 + wallet_ledger(VENDOR_SELL,+).
-            var after = await db.ExecuteScalarAsync<long>(
-                "UPDATE wallet SET balance = balance + @proceeds WHERE player_id = @playerId RETURNING balance",
-                new { proceeds, playerId }, tx);
-            await InsertLedgerAsync(db, tx, playerId, proceeds, after, WalletLedgerReason.VendorSell, null);
+            var after = await CreditWalletAsync(db, tx, playerId, proceeds, WalletLedgerReason.VendorSell, null);
 
             await tx.CommitAsync();
             return new VendorSellResultDto(unitPrice, proceeds, after);
@@ -884,26 +893,13 @@ public sealed partial class MarketRepository(
                 }, tx);
 
             // 2) 판매자: 총액 수령(+) 후 수수료 소각(-). 순수령 = gross - fee.
-            var sellerAfterGross = await db.ExecuteScalarAsync<long>(
-                "UPDATE wallet SET balance = balance + @gross WHERE player_id = @pid RETURNING balance",
-                new { gross, pid = a.SellerId }, tx);
-            await InsertLedgerAsync(db, tx, a.SellerId, gross, sellerAfterGross, WalletLedgerReason.TradeProceeds, a.TradeId);
+            await CreditWalletAsync(db, tx, a.SellerId, gross, WalletLedgerReason.TradeProceeds, a.TradeId);
             if (fee > 0)
-            {
-                var sellerAfterFee = await db.ExecuteScalarAsync<long>(
-                    "UPDATE wallet SET balance = balance - @fee WHERE player_id = @pid RETURNING balance",
-                    new { fee, pid = a.SellerId }, tx);
-                await InsertLedgerAsync(db, tx, a.SellerId, -fee, sellerAfterFee, WalletLedgerReason.Fee, a.TradeId);
-            }
+                await CreditWalletAsync(db, tx, a.SellerId, -fee, WalletLedgerReason.Fee, a.TradeId);
 
             // 3) 매수자: 대금은 이미 에스크로에서 빠졌으므로, 상한가 대비 차익만 환불(+).
             if (improvement > 0)
-            {
-                var buyerAfter = await db.ExecuteScalarAsync<long>(
-                    "UPDATE wallet SET balance = balance + @imp WHERE player_id = @pid RETURNING balance",
-                    new { imp = improvement, pid = a.BuyerId }, tx);
-                await InsertLedgerAsync(db, tx, a.BuyerId, improvement, buyerAfter, WalletLedgerReason.OrderRefund, a.TradeId);
-            }
+                await CreditWalletAsync(db, tx, a.BuyerId, improvement, WalletLedgerReason.OrderRefund, a.TradeId);
 
             // 4) 아이템 이전: 스택형은 수량 가산, 유니크는 소유권 이전.
             if (a.Stackable)
