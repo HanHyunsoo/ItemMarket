@@ -5,7 +5,7 @@
 > 각 항목은 **Q(질문) · 무엇을 보나(probe) · 답변 방향/근거**로 구성했다. `[갭]`은 이 프로젝트가
 > 의도적으로 안 한 것 — 면접에서 **먼저 인정하고 방향을 말하면** 오히려 가점이다.
 >
-> 짝 문서: [`interview-prep.md`](interview-prep.md)(내 답변 스크립트·STAR), [`backend-audit.md`](backend-audit.md)(자체 감사), [`perf-report.md`](perf-report.md)(실측).
+> 짝 문서: [`interview-prep.md`](interview-prep.md)(내 답변 스크립트·STAR), [`backend-audit.md`](../backend-audit.md)(자체 감사), [`perf-report.md`](../perf-report.md)(실측).
 
 ---
 
