@@ -74,9 +74,9 @@ public sealed class RateLimitAppFixture : IAsyncLifetime
     private static string RepoFile(string rel)
     {
         var d = new DirectoryInfo(AppContext.BaseDirectory);
-        while (d is not null && !File.Exists(Path.Combine(d.FullName, "Solution1.sln")))
+        while (d is not null && !File.Exists(Path.Combine(d.FullName, "ItemMarket.sln")))
             d = d.Parent;
-        if (d is null) throw new InvalidOperationException("repo root(Solution1.sln)를 찾지 못함");
+        if (d is null) throw new InvalidOperationException("repo root(ItemMarket.sln)를 찾지 못함");
         return Path.Combine(d.FullName, rel);
     }
 }

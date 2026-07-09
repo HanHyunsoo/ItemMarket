@@ -25,10 +25,10 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Restore
-        run: dotnet restore Solution1.sln
+        run: dotnet restore ItemMarket.sln
 
       - name: Build
-        run: dotnet build Solution1.sln -c Release --no-restore
+        run: dotnet build ItemMarket.sln -c Release --no-restore
 
       # 3개 테스트 프로젝트 모두 실행. Integration/Banding 은 Testcontainers 로
       # 일회용 Postgres 를 띄운다 — ubuntu-latest 러너에 Docker 가 있어 그대로 동작한다.
