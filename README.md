@@ -48,7 +48,7 @@ sequenceDiagram
   OB->>DB: tx2 — 주문 INSERT (실패 시 보상 환불)
   OB->>OB: 대기 매도와 매칭 (가격-시간 우선)
   loop 체결 1건마다
-    OB->>DB: tx3+ — 체결 정산(원자): 캡↔아이템 · 수수료 소각 · item_ledger append
+    OB->>DB: tx3+ — 체결 정산(원자): 캡↔아이템 · 수수료 소각 · wallet_ledger append
     DB-->>OB: COMMIT (실패 시 재수화)
   end
   OB-->>API: 체결 내역 + 잔여
