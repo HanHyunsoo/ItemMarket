@@ -246,7 +246,7 @@
   익명은 원격 IP로 폴백.
 - 한도 초과 시 `429 Too Many Requests` + 표준 `ApiResponse` 실패 봉투(`RateLimited`),
   `Retry-After` 헤더 포함.
-- 설정(`appsettings` → `RateLimiting:Orders`): `PermitLimit`(기본 1000),
+- 설정(`appsettings` → `RateLimiting:Orders`): `PermitLimit`(기본 600),
   `WindowSeconds`(기본 10), `QueueLimit`(기본 0). 데모/테스트가 throttle되지 않도록 넉넉한 기본값.
 
 ## 오류 코드 (`ErrorCode`)
