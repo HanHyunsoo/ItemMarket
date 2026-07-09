@@ -192,7 +192,7 @@ flowchart TB
 
 | | |
 |---|---|
-| **마켓** — 카탈로그 149종·실시간 시세·호가창 진입 | **아이템 상세** — bid/ask 래더·체결·주문폼 |
+| **마켓** — 카탈로그 140종·실시간 시세·호가창 진입 | **아이템 상세** — bid/ask 래더·체결·주문폼 |
 | ![Market](docs/screenshots/market.png) | ![Item detail](docs/screenshots/item-detail.png) |
 | **지갑** — 잔액 + append-only 원장 | **운영(GM) 콘솔** — admin 전용 |
 | ![Wallet](docs/screenshots/wallet.png) | ![Admin](docs/screenshots/admin.png) |

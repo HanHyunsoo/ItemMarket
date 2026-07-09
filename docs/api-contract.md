@@ -54,7 +54,7 @@
 
 | 메서드 | 경로 | 바디 | 응답 `Data` |
 |---|---|---|---|
-| GET | `/api/catalog` | - | `ItemTemplateDto[]` (아이템 마스터 149종(기본 102 + 장비·컨테이너 등 확장)) |
+| GET | `/api/catalog` | - | `ItemTemplateDto[]` (아이템 마스터 140종(기본 93 + 장비·컨테이너 등 확장 47; 시드 id 10–149)) |
 | GET | `/api/wallet` | - | `WalletDto` (현재 플레이어) |
 | GET | `/api/wallet/ledger?page=&size=` | - | `PagedResult<WalletLedgerEntryDto>` |
 | GET | `/api/inventory` | - | `InventoryDto` (스택 + 유니크 인스턴스) |
