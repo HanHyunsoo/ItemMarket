@@ -116,7 +116,7 @@
 | 5 | 같은 함수 — **주문 영속화** | `repo.InsertOrderAsync(OPEN, 전량)`. **catch 블록 주목**: INSERT가 예외인데 실제 커밋됐을 수 있어(L9a) `OrderExists`로 멱등 확인 후에만 보상 환불(이중환불 방지). | 에스크로 커밋 ↔ INSERT는 **별개 트랜잭션** → 고아 에스크로 창(감사 disclosed). |
 | 6 | `MatchAsync` | 반대편 호가를 **가격-시간 우선**으로 정렬, 교차하는 만큼 체결. **체결가=메이커 가격**(테이커는 차익). `maker.PlayerId==incoming.PlayerId`면 **자전거래 스킵**. 각 체결마다 `SettleFillAsync`. | 실제 매칭 알고리즘. 정산 성공 후에만 인메모리 반영(선반영 금지). |
 | 7 | `MarketRepository.cs` `SettleFillAsync` | **단일 트랜잭션 정산**(→ 3구간에서 정독). | 돈·아이템 원자 이동. |
-| 8 | 다시 `OrderEndpoints` | `PlaceOrder` 반환 후 `notifier.PublishOrderActivityAsync(GetSnapshot(), pid, fills)`. | 실시간 발행은 **트랜잭션 밖 best-effort**(→ hotseat A7). |
+| 8 | 다시 `OrderEndpoints` | `PlaceOrder` 반환 후 `notifier.PublishOrderActivityAsync(GetSnapshot(), pid, fills)`. | 실시간 발행은 **트랜잭션 밖 best-effort**(→ hotseat 7장). |
 
 **직접 해보기**: `OrderBookEngine.cs`를 열고 `PlaceOrderAsync` → `MatchAsync`를 한 번 통독하라. 특히 260~296줄
 "커밋 성공 후에만 인메모리 반영" 주석과, 정산 실패 시 `deactivateOnIdle()` 후 rethrow(→ 다음 활성화 재수화)를 봐라.
