@@ -95,7 +95,7 @@
 
 ### M2. 어드민 `status` 필터가 숫자 문자열을 통과시킴 **[FIXED]**
 - `Enum.TryParse("7")`은 정의되지 않은 값으로도 true → `ToDb` 기본값 "OPEN"으로 오필터링.
-  `Enum.IsDefined` 가드 추가(1줄, Program.cs).
+  `Enum.IsDefined` 가드 추가(1줄, `AdminEndpoints.cs` — 엔드포인트를 Program.cs에서 분리하며 이관).
 
 ### M3. `TradePayment` 원장 사유가 실제로는 미사용 **[DEFERRED — 문서화]**
 - 매수자 지출은 주문 시점 `ORDER_ESCROW`(상한가 전액 -)와 체결 시점 차익 `ORDER_REFUND`(+)의 조합으로만
@@ -117,10 +117,14 @@
 - 같은 `created_at`(밀리초 단위 충돌)인 주문들의 상대 순서가 재활성화 후 비결정적일 수 있다.
   제안: `market_order`에 시퀀스 컬럼(bigserial) 추가 후 `(price, seq)` 정렬.
 
-### M7. 레이트리밋/요청 크기 제한 부재 **[DEFERRED — future work]**
-- `/api/auth/login`(비밀번호 없는 개발 스코프)과 주문 API에 레이트리밋이 없다. 스팸 주문으로 호가창
-  메모리/DB를 부풀릴 수 있다(주문당 자산 잠금이 자연 억제책이긴 함). 제안: ASP.NET `AddRateLimiter`
-  (IP/플레이어 기준), 프록시 뒤 배포 시 요청 바디 크기 제한.
+### M7. 레이트리밋/요청 크기 제한 부재 **[FIXED(레이트리밋) / DEFERRED(바디 크기)]**
+- **당시 문제**: 주문 API에 레이트리밋이 없어 스팸 주문으로 호가창 메모리/DB를 부풀릴 수 있었다
+  (주문당 자산 잠금이 자연 억제책이긴 함).
+- **수정**: `POST /api/orders`에 ASP.NET `AddRateLimiter` 적용 — 플레이어(`sub`)별 고정 창 리미터,
+  익명은 원격 IP 폴백, 거부 시 표준 봉투(`ErrorCode.RateLimited`)로 429 + `Retry-After`. 한도는
+  `appsettings("RateLimiting:Orders")`(기본 600/10s = 60 req/s)로 오버라이드한다
+  (`Infrastructure/RateLimiting.cs`, `OrderEndpoints`의 `.RequireRateLimiting`). 회귀 테스트 `RateLimitTests`.
+- **남은 것[DEFERRED]**: 로그인 엔드포인트 레이트리밋, 프록시 뒤 배포 시 요청 바디 크기 제한.
 
 ---
 
@@ -174,9 +178,11 @@
 - **교차-grain 지갑 락 순서 데드락(40P01)** — 서로 다른 아이템 grain의 동시 정산이 같은 지갑 행을 다른
   순서로 잠가 Postgres 데드락 → 정산 tx 시작에 지갑 행을 player_id 오름차순으로 일관 선점(락 순서화).
   p99 973→175ms, 데드락 0. (이후 락 획득이 플랜에 의존하지 않도록 C# 정렬 + 개별 `FOR UPDATE` 문장으로 하드닝.)
-- **그리드 유니크 제약 버그** — 스택용 `(player, template)` 유니크 제약이 인스턴스 행에도 적용돼 같은
-  무기 2정 배치 시 `duplicate key` → **STACK 전용 부분 유니크 인덱스**(`WHERE kind='STACK'`, 컨테이너
-  포함)로 교정.
+- **그리드 유니크 제약 버그** — 초기 `(player, template)` 유니크가 인스턴스 행에도 적용돼 같은 무기
+  2정 배치 시 `duplicate key`가 났고, 스택도 템플릿당 1칸으로 묶여 다중 스택이 불가능했다 →
+  **셀 단위 유일성**으로 재설계: `uq_stash_cell`(player·container·container_instance_id·x·y — 물리
+  컨테이너의 한 칸당 배치 최대 1개)과 `uq_stash_instance`(instance_id 전역 유일)로 분리해, 같은 템플릿을
+  여러 칸에 나눠 담는 다중 스택을 허용하면서 인스턴스 중복도 막는다(`db/ddl.sql`).
 - **raid 정산 롤백 중첩 버그** — StartRaid/Extract/Die 트랜잭션의 예외 처리에서 롤백이 중첩 호출되며
   이미 롤백된 tx를 다시 되돌리려 함 → 단일 롤백 경로로 정리(`catch (PostgresException UniqueViolation)`은
   RaidActive 도메인 에러로 매핑, 그 외는 롤백 후 rethrow).
