@@ -366,7 +366,7 @@ FROM 컨테이너의 **같은 템플릿 전 셀 합(풀)**을 대상으로 함(`
       계약 breaking(loot 서버 결정·LootResultDto·StartRaidRequest zone). (`MarketRepository.cs`, `RaidView.vue`, 테스트 재작성)
 - [ ] **#4** loot마다 사망 확률 상승(그리드 미터). `[중]`
 - [x] **#5** 목적 있는 캡 싱크 — (a) 캡으로 스태시 행 확장(+6행, 점증 가격) `POST /api/stash/upgrade`,
-      (b) **존별 출격 수수료**(recurring 싱크, Low 150/Med 400/High 1000) `POST /api/raid/start` 차감 +
+      (b) **존별 출격 수수료**(recurring 싱크, Low 150/Med 400/High 1000→이후 fun-QA에서 600으로 하향) `POST /api/raid/start` 차감 +
       존 메타 `GET /api/raid/zones`로 배당 표시. #3로 유한해진 loot 경제에 "파밍→거래→확장" 루프를 닫고,
       무비용 1-루팅 그라인딩을 억제한다. (`MarketRepository`, `GearView.vue`, `RaidView.vue`) —
       내구도/수리·보험은 향후.
